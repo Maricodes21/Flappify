@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { getSetting, saveSetting, getCalibration, saveCalibration, getPlayerLevel, getTotalStats } from "../services/storage";
 
-export default function SettingsScreen({ onBack, onCalibrate, onNavigate, userProfile, onLogout }) {
+export default function SettingsScreen({ onBack, onCalibrate, onNavigate, onDifficultyChange, userProfile, onLogout, spotifyConnected, onConnectSpotify, onOpenTaste }) {
   const [sfxVol, setSfxVol] = useState(getSetting("sfxVolume", 80));
   const [musicVol, setMusicVol] = useState(getSetting("musicVolume", 80));
   const [defaultDiff, setDefaultDiff] = useState(getSetting("defaultDifficulty", "normal"));
   const [showGrades, setShowGrades] = useState(getSetting("showGrades", true));
   const [colorblind, setColorblind] = useState(getSetting("colorblindMode", false));
-  const [particleDensity, setParticleDensity] = useState(getSetting("particleDensity", 100));
+  const [showTrailDots, setShowTrailDots] = useState(getSetting("showTrailDots", true));
+  const [showTrailingLine, setShowTrailingLine] = useState(getSetting("showTrailingLine", true));
   const calibOffset = getCalibration();
   const level = getPlayerLevel();
   const stats = getTotalStats();
@@ -53,13 +54,13 @@ export default function SettingsScreen({ onBack, onCalibrate, onNavigate, userPr
             {userProfile?.images?.[0]?.url && (
               <img src={userProfile.images[0].url} alt="" style={{
                 width: 48, height: 48, borderRadius: "50%",
-                border: "2px solid var(--accent)"
+                border: "2px solid var(--border-subtle)"
               }} />
             )}
             <div>
-              <div style={{ fontSize: 14, fontWeight: "bold" }}>{userProfile?.display_name || "Spotify User"}</div>
+              <div style={{ fontSize: 14, fontWeight: "bold" }}>{userProfile?.display_name || "Local Player"}</div>
               <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>
-                {level.emoji} {level.name} · {stats.totalPlays || 0} plays
+                {level.emoji} {level.name} · {stats.totalPlays || 0} plays · {spotifyConnected ? "Spotify connected" : "local mode"}
               </div>
             </div>
           </div>
@@ -71,6 +72,7 @@ export default function SettingsScreen({ onBack, onCalibrate, onNavigate, userPr
           <SettingRow label="SFX Volume">
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <input type="range" min="0" max="100" value={sfxVol}
+                aria-label="Sound effects volume"
                 onChange={e => save("sfxVolume", parseInt(e.target.value), setSfxVol)}
                 style={{ width: 100 }} />
               <span style={{ fontSize: 10, color: "var(--text-dim)", width: 28, textAlign: "right" }}>{sfxVol}%</span>
@@ -79,6 +81,7 @@ export default function SettingsScreen({ onBack, onCalibrate, onNavigate, userPr
           <SettingRow label="Music Volume">
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <input type="range" min="0" max="100" value={musicVol}
+                aria-label="Music volume"
                 onChange={e => save("musicVolume", parseInt(e.target.value), setMusicVol)}
                 style={{ width: 100 }} />
               <span style={{ fontSize: 10, color: "var(--text-dim)", width: 28, textAlign: "right" }}>{musicVol}%</span>
@@ -98,16 +101,21 @@ export default function SettingsScreen({ onBack, onCalibrate, onNavigate, userPr
 
           {/* Gameplay */}
           <SectionHeader>GAMEPLAY</SectionHeader>
-          <SettingRow label="Default Difficulty">
+          <SettingRow label="Run Difficulty">
             <div style={{ display: "flex", gap: 4 }}>
               {["easy", "normal", "hard"].map(d => (
-                <button key={d} onClick={() => save("defaultDifficulty", d, setDefaultDiff)}
+                <button key={d} onClick={() => {
+                  save("defaultDifficulty", d, setDefaultDiff);
+                  onDifficultyChange?.(d);
+                }}
+                  aria-pressed={defaultDiff === d}
                   style={{
-                    background: defaultDiff === d ? "var(--accent)" : "none",
-                    border: `1px solid ${defaultDiff === d ? "var(--accent)" : "var(--border-subtle)"}`,
-                    color: defaultDiff === d ? "#000" : "var(--text-muted)",
-                    padding: "3px 8px", borderRadius: 4, cursor: "pointer",
-                    fontSize: 9, fontFamily: "var(--font-body)", letterSpacing: 1
+                    background: defaultDiff === d ? "var(--accent)" : "var(--bg-card)",
+                    border: "1.5px solid var(--border-subtle)",
+                    color: defaultDiff === d ? "#fff" : "var(--text-primary)",
+                    padding: "4px 10px", borderRadius: 6, cursor: "pointer",
+                    fontSize: 9, fontFamily: "var(--font-music)", fontWeight: 800, letterSpacing: 1,
+                    boxShadow: "var(--paper-shadow-sm)"
                   }}>
                   {d.toUpperCase()}
                 </button>
@@ -116,6 +124,7 @@ export default function SettingsScreen({ onBack, onCalibrate, onNavigate, userPr
           </SettingRow>
           <SettingRow label="Show Timing Grades">
             <button className={`toggle-switch ${showGrades ? "active" : ""}`}
+              type="button" aria-label="Show timing grades" aria-pressed={showGrades}
               onClick={() => save("showGrades", !showGrades, setShowGrades)} />
           </SettingRow>
 
@@ -123,19 +132,22 @@ export default function SettingsScreen({ onBack, onCalibrate, onNavigate, userPr
           <SectionHeader>DISPLAY</SectionHeader>
           <SettingRow label="Colorblind Mode">
             <button className={`toggle-switch ${colorblind ? "active" : ""}`}
+              type="button" aria-label="Colorblind grade cues" aria-pressed={colorblind}
               onClick={() => save("colorblindMode", !colorblind, setColorblind)} />
           </SettingRow>
-          <SettingRow label="Particle Density">
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <input type="range" min="0" max="100" value={particleDensity}
-                onChange={e => save("particleDensity", parseInt(e.target.value), setParticleDensity)}
-                style={{ width: 100 }} />
-              <span style={{ fontSize: 10, color: "var(--text-dim)", width: 28, textAlign: "right" }}>{particleDensity}%</span>
-            </div>
+          <SettingRow label="Trailing Line">
+            <button className={`toggle-switch ${showTrailingLine ? "active" : ""}`}
+              type="button" aria-label="Show trailing rhythm line" aria-pressed={showTrailingLine}
+              onClick={() => save("showTrailingLine", !showTrailingLine, setShowTrailingLine)} />
+          </SettingRow>
+          <SettingRow label="Trail Dots">
+            <button className={`toggle-switch ${showTrailDots ? "active" : ""}`}
+              type="button" aria-label="Show trail dots" aria-pressed={showTrailDots}
+              onClick={() => save("showTrailDots", !showTrailDots, setShowTrailDots)} />
           </SettingRow>
 
-          {/* Sprite */}
-          <SectionHeader>SPRITE</SectionHeader>
+          {/* Customizations */}
+          <SectionHeader>CUSTOMIZATIONS</SectionHeader>
           <SettingRow label="Customize Bird">
             <button className="btn-ghost" onClick={() => onNavigate("sprites")}
               style={{ padding: "4px 12px", fontSize: 10 }}>
@@ -145,10 +157,16 @@ export default function SettingsScreen({ onBack, onCalibrate, onNavigate, userPr
 
           {/* Account Actions */}
           <SectionHeader>ACCOUNT</SectionHeader>
-          <SettingRow label="Logout">
-            <button className="btn-ghost" onClick={onLogout}
-              style={{ padding: "4px 12px", fontSize: 10, borderColor: "var(--danger)", color: "var(--danger)" }}>
-              LOGOUT
+          <SettingRow label="Taste Sources">
+            <button className="btn-ghost" onClick={onOpenTaste}
+              style={{ padding: "4px 12px", fontSize: 10 }}>
+              MANAGE →
+            </button>
+          </SettingRow>
+          <SettingRow label="Spotify Account">
+            <button className="btn-ghost" onClick={spotifyConnected ? onLogout : onConnectSpotify}
+              style={{ padding: "4px 12px", fontSize: 10, borderColor: spotifyConnected ? "var(--danger)" : "var(--accent)", color: spotifyConnected ? "var(--danger)" : "var(--accent)" }}>
+              {spotifyConnected ? "LOG OUT" : "LOG IN"}
             </button>
           </SettingRow>
           <SettingRow label="Clear Local Data">
@@ -161,8 +179,8 @@ export default function SettingsScreen({ onBack, onCalibrate, onNavigate, userPr
 
         {/* About */}
         <div style={{ marginTop: 24, textAlign: "center", color: "var(--text-faint)", fontSize: 10 }}>
-          <div>Spotify Flappy v2.0</div>
-          <div style={{ marginTop: 4 }}>MUSIC-DRIVEN · BEAT-SYNCED · NEON-FUELED</div>
+          <div>Flappyfy Web v2.0</div>
+          <div style={{ marginTop: 4 }}>LOCAL FULL SYNC · TASTE-LED DISCOVERY</div>
         </div>
       </div>
     </div>

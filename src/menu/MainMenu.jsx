@@ -1,306 +1,750 @@
-import { useState, useEffect } from "react";
-import { getTopTracks, getAudioFeatures } from "../services/spotify";
-import { getGameTopTracks, getLastPlayed, getBestScore } from "../services/storage";
-import { computeDifficultyRating } from "../game/beatMapper";
+﻿import { useEffect, useRef, useState, useMemo, useCallback } from "react";
+import { getPlaylists, getPlaylistTracks, getTopTracks, getRecentlyPlayed } from "../services/spotify";
+import { getScorePoints } from "../game/scoring";
+import {
+  getBestScore,
+  getGameTopTracks,
+  getImportedTracks,
+  getJourneyProgress,
+  getLastPlayed,
+  getLocalPlaylists,
+  getPlaylistJourney,
+  getProgressionOverview,
+  saveImportedTrack,
+  saveLocalPlaylist,
+  startOrResumeJourney,
+  getDailyListeningTracks,
+  isBlockedItem,
+} from "../services/storage";
+import { SpotifyIcon } from "../screens";
 import CurrentlyListening from "./NowPlaying";
 import LastPlayed from "./LastPlayed";
 
-const FF = "Orbitron, monospace";
-const FM = "'DM Sans', -apple-system, sans-serif";
+const RATING_COLORS = { S: "#cf5d44", A: "#82a874", B: "#6ea4b8", C: "#d6a45b", D: "#9e9486" };
+const RUN_VARIANTS = ["sage", "terracotta", "kraft", "amber"];
+const PLAYLIST_VARIANTS = ["terracotta", "amber", "sage", "kraft"];
 
-/* ── Color roles ──
-   Green (#1DB954)  = interactive only — play buttons, CTAs, active nav
-   Amber (#f5a623)  = achievement — scores, section "best runs"
-   Grade colors     = rating identity — S gold, A green, B blue, C orange, D gray
-   Neutral gray     = everything else — labels, borders, section headers
-*/
-const RATING_COLORS = { S: "#FFD700", A: "#4ade80", B: "#60a5fa", C: "#f59e0b", D: "#808090" };
-const STAR_COLORS = { 1: "#4ade80", 2: "#f59e0b", 3: "#ff4466" };
-
-function DifficultyStars({ stars, size = 8 }) {
-  if (!stars) return null;
-  const color = STAR_COLORS[stars] || "#808090";
-  return (
-    <div style={{ display: "flex", gap: 1 }}>
-      {[1, 2, 3].map(i => (
-        <span key={i} style={{ fontSize: size, color: i <= stars ? color : "#404050", textShadow: i <= stars ? `0 0 4px ${color}44` : "none" }}>★</span>
-      ))}
-    </div>
-  );
-}
-
-/* ── Quick Play Hero Card ── */
-function QuickPlayCard({ track, onPlay }) {
-  if (!track) return null;
-  const albumArt = track?.album?.images?.[0]?.url || track?.album?.images?.[1]?.url;
-  return (
-    <div onClick={() => onPlay(track)}
-      style={{
-        position: "relative", borderRadius: 16, overflow: "hidden", cursor: "pointer",
-        border: "1px solid var(--border-subtle)",
-        background: "var(--bg-card)",
-        transition: "all 0.25s cubic-bezier(0.4,0,0.2,1)",
-        boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
-      }}
-      onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.15)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
-      onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border-subtle)"; e.currentTarget.style.transform = "translateY(0)"; }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: 14 }}>
-        {albumArt && (
-          <img src={albumArt} alt=""
-            style={{ width: 72, height: 72, borderRadius: 10, flexShrink: 0,
-              border: "1px solid rgba(255,255,255,0.08)",
-              boxShadow: "0 4px 16px rgba(0,0,0,0.4)" }} />
-        )}
-        <div style={{ flex: 1, overflow: "hidden" }}>
-          <div style={{ fontFamily: FF, fontSize: 8, color: "#808090", letterSpacing: 3, marginBottom: 4 }}>QUICK PLAY</div>
-          <div className="music-title" style={{ fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{track.name}</div>
-          <div className="music-artist" style={{ fontSize: 12, marginTop: 2 }}>{track.artists?.map(a => a.name).join(", ")}</div>
-        </div>
-        {/* Play button — green is correct here, it's a CTA */}
-        <div style={{
-          width: 48, height: 48, borderRadius: "50%", flexShrink: 0,
-          background: "linear-gradient(135deg, #1DB954, #4ade80)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          boxShadow: "0 4px 20px rgba(29,185,84,0.4)",
-          fontSize: 20, color: "#000", paddingLeft: 3,
-        }}>▶</div>
-      </div>
-    </div>
-  );
-}
-
-/* ── Compact Run Card ── */
-function RunCard({ track, score, rating, stars, songPct, onPlay }) {
+function RunCard({ track, score, rating, songPct, onPlay, index = 0, rank = 1 }) {
   const albumArt = track?.album?.images?.[1]?.url || track?.album?.images?.[0]?.url;
-  const ratingColor = RATING_COLORS[rating] || "#404050";
+  const ratingColor = RATING_COLORS[rating] || "#2b231c";
+  const variant = RUN_VARIANTS[index % RUN_VARIANTS.length];
+  const hasClip = index % 2 === 0;
+  const isDogEared = index === 1;
+
   return (
-    <div onClick={() => onPlay && onPlay(track)}
-      style={{
-        display: "flex", alignItems: "center", gap: 10, padding: "8px 10px",
-        background: `linear-gradient(90deg, ${ratingColor}0C, var(--bg-card) 50%)`,
-        border: "1px solid var(--border-subtle)",
-        borderLeft: `4px solid ${ratingColor}`, borderRadius: 8,
-        cursor: onPlay ? "pointer" : "default",
-        transition: "all 0.2s cubic-bezier(0.4,0,0.2,1)",
-        minHeight: 52,
-      }}
-      onMouseEnter={e => { if (onPlay) { e.currentTarget.style.background = "var(--bg-card-hover)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"; e.currentTarget.style.borderLeftColor = ratingColor; }}}
-      onMouseLeave={e => { e.currentTarget.style.background = `linear-gradient(90deg, ${ratingColor}0C, var(--bg-card) 50%)`; e.currentTarget.style.borderColor = "var(--border-subtle)"; e.currentTarget.style.borderLeftColor = ratingColor; }}
+    <button
+      className={`run-card run-card--${variant} ${isDogEared ? "run-card--fold" : ""}`}
+      onClick={onPlay}
+      disabled={!onPlay}
+      style={{ "--run-color": ratingColor }}
+      title={track?.name ? `Play ${track.name} (Score: ${score?.toLocaleString?.() || 0})` : undefined}
     >
-      {albumArt && <img src={albumArt} alt="" style={{ width: 36, height: 36, borderRadius: 6, flexShrink: 0 }} />}
-      <div style={{ flex: 1, overflow: "hidden" }}>
-        <div className="music-title" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{track?.name || "Track"}</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
-          {songPct != null && (
-            <span style={{ fontFamily: FF, fontSize: 7, color: "#606070", letterSpacing: 0.5 }}>{songPct}%</span>
-          )}
-        </div>
-      </div>
-      {/* Score in amber, grade in its own color */}
-      <div style={{ textAlign: "right", flexShrink: 0 }}>
-        {score != null && (
-          <div style={{ fontFamily: FF, fontSize: 11, color: "#f5a623", fontWeight: "bold" }}>
-            {score?.toLocaleString()}
-          </div>
-        )}
-        {rating && (
-          <div style={{ fontFamily: FF, fontSize: 14, fontWeight: 900, color: ratingColor, lineHeight: 1 }}>
-            {rating}
-          </div>
-        )}
-      </div>
-    </div>
+      <span className="run-card-rank-badge">#{rank}</span>
+      {hasClip ? (
+        <span className="craft-clip craft-clip--tr" aria-hidden="true" />
+      ) : (
+        <span className={`craft-pin ${index % 4 === 3 ? "craft-pin--amber" : ""} craft-pin--tr`} aria-hidden="true" />
+      )}
+      {index === 0 && <span className="craft-pin craft-pin--tl" aria-hidden="true" />}
+      {index === 1 && <span className="craft-pin craft-pin--tl" aria-hidden="true" />}
+      {albumArt ? <img src={albumArt} alt="" /> : <span className="track-art-fallback">♫</span>}
+      <span className="run-card-copy">
+        <strong>{track?.name || "Untitled Track"}</strong>
+        <small>{track?.artists?.map?.(a => a.name).join(", ") || "Unknown Artist"}</small>
+      </span>
+      <span className="run-card-score">
+        <strong>{score != null ? score.toLocaleString() : "—"}</strong>
+        {rating ? <em style={{ color: ratingColor }}>{rating}</em> : (songPct != null ? <em>{songPct}%</em> : <em>OPEN</em>)}
+      </span>
+    </button>
   );
 }
 
-export default function MainMenu({ token, onPickTrack, onNavigate, userProfile }) {
-  const [quickTracks, setQuickTracks] = useState([]);
-  const [gameTopTracks, setGameTopTracks] = useState([]);
-  const [lastPlayed, setLastPlayed] = useState(null);
+function PlaylistCraftCard({
+  playlist,
+  index = 0,
+  isActiveJourney = false,
+  journeyProgress,
+  onResumeOrPlay,
+  onOpenPlaylist,
+}) {
+  const variant = PLAYLIST_VARIANTS[index % PLAYLIST_VARIANTS.length];
+  const trackCount = playlist.tracks?.total ?? playlist.trackCount ?? 0;
+  const isResumable = isActiveJourney || (journeyProgress && journeyProgress.percent > 0);
+  const percent = journeyProgress ? journeyProgress.percent : 0;
 
-  useEffect(() => {
-    getTopTracks(token, "short_term", 6).then(tracks => setQuickTracks(tracks));
-    setGameTopTracks(getGameTopTracks(5));
-    const lp = getLastPlayed();
-    if (lp) setLastPlayed(lp);
-  }, [token]);
+  const hasGrid = Array.isArray(playlist.coverImages) && playlist.coverImages.length >= 4;
+  const singleImg = playlist.images?.[0]?.url || playlist.coverImage;
 
   return (
-    <div className="screen-scroll fade-in" style={{ paddingBottom: 84 }}>
-      <div style={{ maxWidth: 480, margin: "0 auto" }}>
+    <div
+      className={`craft-playlist-card craft-playlist-card--${variant}`}
+      onClick={() => onOpenPlaylist(playlist)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpenPlaylist(playlist);
+        }
+      }}
+    >
+      <span className="craft-clip craft-clip--tc" aria-hidden="true" />
 
-        {/* ── Logo & Welcome ── */}
-        <div style={{ textAlign: "center", marginBottom: 24, position: "relative" }}>
-          <div style={{
-            position: "absolute", top: -24, left: "50%", transform: "translateX(-50%)",
-            width: 220, height: 70,
-            background: "radial-gradient(ellipse, rgba(29,185,84,0.4) 0%, transparent 70%)",
-            filter: "blur(24px)", opacity: 0.35, pointerEvents: "none",
-          }} />
-          <h1 className="neon-heading" style={{
-            fontSize: 22, fontWeight: 900, marginBottom: 4,
-            background: "linear-gradient(135deg, #4ade80, #00f0ff, #1DB954, #ff2d95)",
-            WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-            backgroundSize: "300% 300%",
-            animation: "gradient-shift 6s ease infinite",
-          }}>
-            FLAPPYFY
-          </h1>
-          {userProfile && (
-            <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-              {userProfile.images?.[0]?.url && (
-                <img src={userProfile.images[0].url} alt="" style={{
-                  width: 24, height: 24, borderRadius: "50%",
-                  border: "1px solid rgba(255,255,255,0.15)",
-                }} />
-              )}
-              <span style={{ fontSize: 12, color: "#b0b0c0", fontFamily: FM }}>
-                {userProfile.display_name}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* ── Hero: Quick Play (last played or top track) ── */}
-        <div style={{ marginBottom: 20 }}>
-          <CurrentlyListening token={token} onPlayTrack={onPickTrack} />
-          <div style={{ height: 10 }} />
-          <LastPlayed onPlayTrack={onPickTrack} />
-          {!lastPlayed && quickTracks.length > 0 && (
-            <QuickPlayCard track={quickTracks[0]} onPlay={onPickTrack} />
-          )}
-        </div>
-
-        {/* ── Best Runs — amber header (achievement) ── */}
-        {gameTopTracks.length > 0 && (
-          <div style={{ marginBottom: 22 }}>
-            <div style={{
-              fontFamily: FF, fontSize: 10, letterSpacing: 3,
-              color: "#f5a623", marginBottom: 8,
-              borderBottom: "1px solid #1a1a28", paddingBottom: 6,
-            }}>
-              YOUR BEST RUNS
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {gameTopTracks.map((t, i) => (
-                <RunCard key={t.trackId || i}
-                  track={t.trackObj || { name: t.trackName, album: { images: [{ url: t.albumArt }] } }}
-                  score={t.totalScore || t.score}
-                  rating={t.rating}
-                  stars={t.difficultyStars}
-                  songPct={t.songPct}
-                  onPlay={t.trackObj ? () => onPickTrack(t.trackObj) : null}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ── Browse: Pick a Level — neutral header ── */}
-        <div style={{ marginBottom: 24 }}>
-          <div style={{
-            fontFamily: FF, fontSize: 10, letterSpacing: 3,
-            color: "#808090", marginBottom: 10,
-            borderBottom: "1px solid #1a1a28", paddingBottom: 6,
-          }}>
-            PICK A LEVEL
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-            {[
-              { id: "playlists", icon: "📋", label: "PLAYLISTS", desc: "Your collections" },
-              { id: "search", icon: "🔍", label: "SEARCH", desc: "Find any song" },
-              { id: "top-tracks", icon: "🔥", label: "TOP TRACKS", desc: "Your favorites" },
-            ].map(item => (
-              <div key={item.id} className="card-interactive"
-                onClick={() => onNavigate(item.id)}
-                style={{
-                  padding: "16px 8px", textAlign: "center",
-                  display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
-                }}>
-                <span style={{ fontSize: 26 }}>{item.icon}</span>
-                <span style={{ fontFamily: FF, fontSize: 8, letterSpacing: 1.5, color: "#b0b0c0" }}>{item.label}</span>
-                <span style={{ fontSize: 9, color: "#606070", fontFamily: FM }}>{item.desc}</span>
-              </div>
+      <div className="playlist-art-frame">
+        {hasGrid ? (
+          <div className="playlist-art-grid">
+            {playlist.coverImages.slice(0, 4).map((src, i) => (
+              <img key={i} src={src} alt="" loading="lazy" />
             ))}
           </div>
-        </div>
+        ) : singleImg ? (
+          <img src={singleImg} alt="" className="playlist-art-single" loading="lazy" />
+        ) : (
+          <div className="playlist-art-fallback">♫</div>
+        )}
+      </div>
 
-        {/* ── Spotify Favorites — neutral header ── */}
-        {quickTracks.length > 0 && (
-          <div style={{ marginBottom: 24 }}>
-            <div style={{
-              fontFamily: FF, fontSize: 10, letterSpacing: 3,
-              color: "#808090", marginBottom: 10,
-              borderBottom: "1px solid #1a1a28", paddingBottom: 6,
-            }}>
-              SPOTIFY FAVORITES
+      <div className="playlist-card-info">
+        <strong className="playlist-card-title" title={playlist.name}>
+          {playlist.name}
+        </strong>
+        <span className="playlist-card-meta">
+          {trackCount} tracks
+        </span>
+      </div>
+
+      <button
+        type="button"
+        className={`playlist-card-btn ${isResumable ? "playlist-card-btn--resume" : ""}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onResumeOrPlay(playlist);
+        }}
+        title={isResumable ? `Resume playlist ${playlist.name}` : `Play playlist ${playlist.name}`}
+      >
+        <span>{isResumable ? "► RESUME" : "► PLAY"}</span>
+      </button>
+
+      <div className="playlist-stamp" aria-label={`${percent}% completed`}>
+        <span>{percent}%</span>
+      </div>
+    </div>
+  );
+}
+
+export default function MainMenu({
+  token,
+  onPickTrack,
+  onPickTasteTrack,
+  onUploadTrack,
+  onNavigate,
+  onSelectPlaylist,
+  onConnectSpotify,
+  onOpenTaste,
+  userProfile,
+  tasteProfiles,
+  notice,
+}) {
+  const [quickTracks, setQuickTracks] = useState([]);
+  const [loadingQuickTracks, setLoadingQuickTracks] = useState(Boolean(token));
+  const [gameTopTracks, setGameTopTracks] = useState(() => getGameTopTracks(4));
+  const [spotifyPlaylists, setSpotifyPlaylists] = useState([]);
+  const [loadingPlaylists, setLoadingPlaylists] = useState(Boolean(token));
+  const [localPlaylists, setLocalPlaylists] = useState(() => getLocalPlaylists());
+  const [importedTracks, setImportedTracks] = useState(() => getImportedTracks());
+  const [dailyRoundupTracks, setDailyRoundupTracks] = useState(() => getDailyListeningTracks());
+  const [loadingDaily, setLoadingDaily] = useState(Boolean(token));
+  const [lastPlayed, setLastPlayed] = useState(null);
+  const [progression, setProgression] = useState(() => getProgressionOverview());
+  const fileInputRef = useRef(null);
+  const playlistInputRef = useRef(null);
+
+  const refreshDynamicState = useCallback(() => {
+    setGameTopTracks(getGameTopTracks(4));
+    setProgression(getProgressionOverview());
+    setLastPlayed(getLastPlayed());
+    setLocalPlaylists(getLocalPlaylists());
+    setImportedTracks(getImportedTracks());
+    setDailyRoundupTracks(getDailyListeningTracks());
+  }, []);
+
+  useEffect(() => {
+    refreshDynamicState();
+    window.addEventListener("focus", refreshDynamicState);
+    window.addEventListener("storage", refreshDynamicState);
+    return () => {
+      window.removeEventListener("focus", refreshDynamicState);
+      window.removeEventListener("storage", refreshDynamicState);
+    };
+  }, [refreshDynamicState]);
+
+  useEffect(() => {
+    if (token) {
+      setLoadingQuickTracks(true);
+      setLoadingPlaylists(true);
+      setLoadingDaily(true);
+
+      getTopTracks(token, "short_term", 6)
+        .then(res => { setQuickTracks(res); setLoadingQuickTracks(false); })
+        .catch(() => { setQuickTracks([]); setLoadingQuickTracks(false); });
+
+      getPlaylists(token, 50)
+        .then(res => {
+          setSpotifyPlaylists(Array.isArray(res) ? res : []);
+          setLoadingPlaylists(false);
+        })
+        .catch(err => {
+          console.warn("[MainMenu] playlists fetch failed", err);
+          setSpotifyPlaylists([]);
+          setLoadingPlaylists(false);
+        });
+
+      getRecentlyPlayed(token, 50)
+        .then(recent => {
+          const localDaily = getDailyListeningTracks();
+          const combined = [...localDaily];
+          (recent || []).forEach(t => {
+            if (!combined.some(c => c.id === t.id)) combined.push(t);
+          });
+          setDailyRoundupTracks(combined);
+          setLoadingDaily(false);
+        })
+        .catch(() => {
+          setDailyRoundupTracks(getDailyListeningTracks());
+          setLoadingDaily(false);
+        });
+    } else {
+      setQuickTracks([]);
+      setSpotifyPlaylists([]);
+      setLoadingPlaylists(false);
+      setLoadingQuickTracks(false);
+      setDailyRoundupTracks(getDailyListeningTracks());
+      setLoadingDaily(false);
+    }
+  }, [token]);
+
+  const activeJourney = progression.activeJourney;
+  const journeyProgress = getJourneyProgress(activeJourney);
+  const nextJourneyTrack = activeJourney?.tracks?.[activeJourney.currentIndex] || null;
+  const levelProgress = Math.max(0, Math.min(1, progression.level?.progress || 0));
+  const showRecent = Boolean(lastPlayed || token);
+
+  // Top 4 Playlists:
+  // When connected, show the user's top 4 Spotify playlists (active journey prioritized).
+  // When not connected, do not show Spotify playlists; show user's imported local playlists.
+  const topPlaylists = useMemo(() => {
+    if (token) {
+      const valid = (spotifyPlaylists || []).filter(p => p && p.id && !isBlockedItem(p));
+      // Prioritize user's own created playlists first, then any other saved playlists
+      const owned = valid.filter(p => p.owner && userProfile?.id && p.owner.id === userProfile.id);
+      const others = valid.filter(p => !owned.some(o => o.id === p.id));
+      const sorted = [...owned, ...others];
+      return sorted.slice(0, 4);
+    }
+    // Disconnected: only show user's imported local playlists
+    return (localPlaylists || []).filter(p => p && p.id && !isBlockedItem(p)).slice(0, 4);
+  }, [token, spotifyPlaylists, userProfile, localPlaylists]);
+
+  // Top 6 tracks for the Top Tracks section:
+  // When connected to Spotify, pull from Spotify quickTracks.
+  // When not connected, pull from imported tracks or played tracks.
+  const topDisplayTracks = useMemo(() => {
+    if (token && quickTracks.length > 0) {
+      return quickTracks.slice(0, 6);
+    }
+    if (importedTracks.length > 0) {
+      return importedTracks.slice(0, 6);
+    }
+    return gameTopTracks
+      .map(r => (r.trackObj ? r.trackObj : r.trackName ? {
+        id: r.trackId,
+        name: r.trackName,
+        artists: [{ name: r.artistName || "Local" }],
+        album: { images: [{ url: r.albumArt }] }
+      } : null))
+      .filter(Boolean)
+      .slice(0, 6);
+  }, [token, quickTracks, importedTracks, gameTopTracks]);
+
+  const choosePlaylistFiles = () => playlistInputRef.current?.click();
+  const handleImportPlaylistFiles = (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (files.length === 0) return;
+
+    const audioFiles = files.filter(f => f.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(f.name));
+    if (audioFiles.length === 0) return;
+
+    const tracks = audioFiles.map((file, i) => {
+      const objectUrl = URL.createObjectURL(file);
+      const cleanName = file.name.replace(/\.[^/.]+$/, "").replace(/^\d+[\s.-]*/, "") || `Track ${i + 1}`;
+      const trackObj = {
+        id: `local-trk-${Date.now()}-${i}`,
+        name: cleanName,
+        artists: [{ name: "Local Artist" }],
+        album: { name: "Local Playlist", images: [] },
+        duration_ms: 180000,
+        playbackProvider: "local",
+        localAudioUrl: objectUrl,
+        localFileName: file.name,
+      };
+      saveImportedTrack(trackObj);
+      return trackObj;
+    });
+
+    const playlistName = audioFiles.length > 1
+      ? `Local Mix (${audioFiles.length} tracks)`
+      : (audioFiles[0].name.replace(/\.[^/.]+$/, "") || "Local Playlist");
+
+    const newPlaylist = {
+      id: `local-pl-${Date.now()}`,
+      name: playlistName,
+      isLocal: true,
+      tracks: { total: tracks.length, items: tracks },
+      images: [],
+      createdAt: Date.now(),
+    };
+    saveLocalPlaylist(newPlaylist);
+    refreshDynamicState();
+  };
+
+  const handleOpenDailyRoundup = () => {
+    const list = dailyRoundupTracks.length > 0
+      ? dailyRoundupTracks
+      : (importedTracks.length > 0 ? importedTracks : []);
+    const playlistObj = {
+      id: "daily-roundup",
+      name: `DAILY ROUNDUP • ${new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })}`,
+      isLocal: true,
+      isDailyRoundup: true,
+      tracks: {
+        total: list.length,
+        items: list,
+      },
+      images: list[0]?.album?.images || [],
+    };
+    if (onSelectPlaylist) {
+      onSelectPlaylist(playlistObj, "menu");
+    } else {
+      onNavigate("playlists");
+    }
+  };
+
+  // Top 4 runs dynamically adjusted with guaranteed 4 visual slots
+  const bestRuns = gameTopTracks.slice(0, 4);
+  const slotsToDisplay = [...bestRuns];
+  while (slotsToDisplay.length < 4) {
+    slotsToDisplay.push(null);
+  }
+
+  const handleResumeOrPlayPlaylist = async (playlist) => {
+    if (activeJourney?.id === playlist.id && nextJourneyTrack) {
+      onPickTrack(nextJourneyTrack, { journeyId: activeJourney.id });
+      return;
+    }
+
+    const existingJourney = getPlaylistJourney(playlist.id);
+    if (existingJourney && existingJourney.tracks?.length > 0) {
+      const nextTrack = existingJourney.tracks[existingJourney.currentIndex || 0] || existingJourney.tracks[0];
+      if (nextTrack) {
+        onPickTrack(nextTrack, { journeyId: existingJourney.id });
+        return;
+      }
+    }
+
+    if (token && playlist.id) {
+      try {
+        const tracks = await getPlaylistTracks(token, playlist.id, 50);
+        if (tracks.length > 0) {
+          const started = startOrResumeJourney(playlist, tracks);
+          const first = started.tracks?.[started.currentIndex || 0] || started.tracks?.[0];
+          if (first) {
+            onPickTrack(first, { journeyId: started.id });
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("[MainMenu] failed to load playlist tracks", err);
+      }
+    }
+
+    if (onSelectPlaylist) {
+      onSelectPlaylist(playlist, "menu");
+    } else {
+      onNavigate("playlists");
+    }
+  };
+
+  const handlePlaylistCardClick = (playlist) => {
+    if (onSelectPlaylist) {
+      onSelectPlaylist(playlist, "menu");
+    } else {
+      onNavigate("playlists");
+    }
+  };
+
+  const chooseFile = () => fileInputRef.current?.click();
+  const receiveFile = event => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) onUploadTrack(file);
+  };
+
+  return (
+    <main className="screen-scroll home-screen home-main-content fade-in" style={{ paddingBottom: 96 }}>
+      <input ref={fileInputRef} className="visually-hidden" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" onChange={receiveFile} />
+      <div className="home-container">
+        <header className="home-header">
+          <div>
+            <h1>FLAPPYFY</h1>
+          </div>
+          <button className="profile-chip" onClick={() => onNavigate("settings")} aria-label="Open settings">
+            {userProfile?.images?.[0]?.url ? <img src={userProfile.images[0].url} alt="" /> : <span>{userProfile ? "S" : "L"}</span>}
+            <small>{userProfile?.display_name || "LOCAL PLAYER"}</small>
+          </button>
+        </header>
+
+        {notice && <div className="home-notice" role="status">{notice}</div>}
+
+        {/* Player Progression (Original compact size) */}
+
+
+        <section className="progress-panel" aria-label="Player progression">
+            <span className="craft-clip craft-clip--tl" aria-hidden="true" />
+            <div className="rank-lockup">
+              <span>{progression.level?.name?.slice(0, 1) || "S"}</span>
+              <div><small>PLAYER RANK</small><strong>{progression.level?.name || "Silver"}</strong></div>
             </div>
-            <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 8, scrollSnapType: "x mandatory" }}>
-              {quickTracks.map(t => {
-                const best = getBestScore(t.id);
-                const albumArt = t.album?.images?.[1]?.url || t.album?.images?.[0]?.url;
-                const borderColor = best ? RATING_COLORS[best.rating] || "#1a1a28" : "#1a1a28";
-                return (
-                  <div key={t.id} onClick={() => onPickTrack(t)}
-                    style={{
-                      flexShrink: 0, width: 100, scrollSnapAlign: "start",
-                      cursor: "pointer", textAlign: "center",
-                      transition: "transform 0.2s",
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.transform = "translateY(-3px)"}
-                    onMouseLeave={e => e.currentTarget.style.transform = "translateY(0)"}
-                  >
-                    <div style={{
-                      width: 80, height: 80, borderRadius: 10, overflow: "hidden", margin: "0 auto",
-                      border: `2px solid ${borderColor}`,
-                      boxShadow: best?.rating === "S" ? "0 0 14px rgba(255,215,0,0.3)" : "0 4px 12px rgba(0,0,0,0.5)",
-                    }}>
-                      {albumArt ? (
-                        <img src={albumArt} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                      ) : (
-                        <div style={{ width: "100%", height: "100%", background: "#0d0d14", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>🎵</div>
-                      )}
-                    </div>
-                    <div className="music-title" style={{ fontSize: 10, marginTop: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 90, margin: "6px auto 0" }}>{t.name}</div>
-                    <div className="music-artist" style={{ fontSize: 9, marginTop: 1 }}>{t.artists?.[0]?.name}</div>
-                    {/* Grade letter in its own color */}
-                    {best && (
-                      <div style={{ fontFamily: FF, fontSize: 9, color: RATING_COLORS[best.rating] || "#808090", fontWeight: "bold", marginTop: 2 }}>
-                        {best.rating}
+            <div className="rank-progress">
+              <div><span style={{ width: `${levelProgress * 100}%` }} /></div>
+              <small>{progression.level?.nextName ? `${progression.level.nextThreshold - progression.xp} XP TO ${progression.level.nextName.toUpperCase()}` : "MAX RANK"}</small>
+            </div>
+            <div className="rank-stats"><span><b>{progression.masteryStars}</b> STARS</span><span><b>{progression.tracksCleared}</b> CLEARS</span><span><b>{progression.xp}</b> XP</span></div>
+          </section>
+
+
+
+        {/* Play Your Way */}
+
+
+        <section className="play-paths" aria-labelledby="play-your-way">
+            <div className="section-heading-row">
+              <div><h2 id="play-your-way">PLAY YOUR WAY</h2></div>
+              <small>Audio stays in this browser session</small>
+            </div>
+            <div className={`play-path-grid ${token ? "is-single" : ""}`}>
+              <button className="play-path-card play-path-card--local" onClick={chooseFile} title="Upload an audio file to play">
+                <span className="craft-clip craft-clip--tr" aria-hidden="true" />
+                <span className="path-index">FULL SYNC</span>
+                <span className="path-copy">
+                  <strong>DROP IN YOUR TRACK</strong>
+                </span>
+                <span className="path-action">CHOOSE AUDIO <b>↗</b></span>
+                <span className="craft-doodles" aria-hidden="true">
+                  <svg width="68" height="68" viewBox="0 0 68 68" fill="none">
+                    <path d="M42 22C42 16 46 14 52 12V24" stroke="#2b231c" strokeWidth="1.8" strokeLinecap="round"/>
+                    <circle cx="40" cy="24" r="3.5" fill="#2b231c"/>
+                    <path d="M54 38C54 32 58 30 62 28V38" stroke="#2b231c" strokeWidth="1.8" strokeLinecap="round"/>
+                    <circle cx="52" cy="40" r="3.5" fill="#2b231c"/>
+                    <path d="M50 48C48 44 48 40 54 36M50 48C52 46 56 46 58 50M50 48C46 52 48 56 52 56" stroke="#2e5339" strokeWidth="1.6" strokeLinecap="round"/>
+                    <path d="M28 14L29.5 18L33.5 19.5L29.5 21L28 25L26.5 21L22.5 19.5L26.5 18Z" fill="#cf845e" stroke="#2b231c" strokeWidth="1"/>
+                    <path d="M60 16L61 19L64 20L61 21L60 24L59 21L56 20L59 19Z" fill="#d6a45b" stroke="#2b231c" strokeWidth="1"/>
+                  </svg>
+                </span>
+              </button>
+
+              {!token && (
+                <button className="play-path-card play-path-card--spotify" onClick={onConnectSpotify} title="Log in with Spotify">
+                  <span className="craft-clip craft-clip--tr" aria-hidden="true" />
+                  <span className="path-index">SPOTIFY SYNC</span>
+                  <span className="path-copy">
+                    <strong>LOG IN WITH SPOTIFY</strong>
+                  </span>
+                  <span className="path-action">CONNECT ACCOUNT <b>↗</b></span>
+                </button>
+              )}
+            </div>
+          </section>
+
+        {/* Lined-up DAILY ROUNDUP & KEEP MOVING (Matching in size & craftsmanship) */}
+        <section className="paired-cards-section" aria-label="Daily Roundup and Keep Moving">
+          <div className="paired-cards-grid">
+            {/* Daily Roundup Card */}
+            <div className="paired-card-item">
+              <div className="section-heading-row">
+                <div className="playlist-heading-group">
+                  <h2 id="daily-roundup-heading">DAILY ROUNDUP</h2>
+                  <span className="playlist-stars" aria-hidden="true">★★★★</span>
+                </div>
+                <span className="daily-roundup-badge">TODAY'S MIX</span>
+              </div>
+
+              {loadingDaily ? (
+                <div className="daily-roundup-loading">
+                  <span className="spin-slow" style={{ fontSize: 20 }}>🎵</span>
+                  <small>GATHERING TODAY'S SONGS...</small>
+                </div>
+              ) : (
+                <button
+                  className="daily-roundup-card"
+                  onClick={handleOpenDailyRoundup}
+                  title="Play through today's songs"
+                  aria-label="Open Daily Roundup"
+                >
+                  <span className="craft-clip craft-clip--tr" aria-hidden="true" />
+                  <span className="craft-pin craft-pin--tl" aria-hidden="true" />
+
+                  <div className="daily-roundup-art-preview">
+                    {dailyRoundupTracks.filter(t => t.album?.images?.[0]?.url).length >= 4 ? (
+                      <div className="daily-art-grid">
+                        {dailyRoundupTracks
+                          .filter(t => t.album?.images?.[0]?.url)
+                          .slice(0, 4)
+                          .map((t, i) => (
+                            <img key={i} src={t.album.images[0].url} alt="" loading="lazy" />
+                          ))}
+                      </div>
+                    ) : dailyRoundupTracks[0]?.album?.images?.[0]?.url ? (
+                      <img src={dailyRoundupTracks[0].album.images[0].url} alt="" className="daily-art-single" loading="lazy" />
+                    ) : (
+                      <div className="daily-art-placeholder">
+                        <span>📅</span>
                       </div>
                     )}
                   </div>
+
+                  <div className="daily-roundup-content">
+                    <span className="daily-roundup-tag">DAILY AUDIO LOG</span>
+                    <strong className="daily-roundup-title">
+                      {dailyRoundupTracks.length > 0
+                        ? `Today's Listening (${dailyRoundupTracks.length} tracks)`
+                        : "Today's Listening"}
+                    </strong>
+                    <p className="daily-roundup-desc">
+                      {dailyRoundupTracks.length > 0
+                        ? `Play through the songs you listened to today in rhythm runs.`
+                        : `Play a song or listen on Spotify to assemble your daily roundup.`}
+                    </p>
+                    <div className="daily-roundup-action">
+                      <span className="daily-play-btn">
+                        {dailyRoundupTracks.length > 0 ? "PLAY ROUNDUP ▶" : "START PLAYING ▶"}
+                      </span>
+                      <span className="daily-date-label">
+                        {new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              )}
+            </div>
+
+            {/* Keep Moving Card */}
+            <div className="paired-card-item">
+              <div className="section-heading-row">
+                <div><h2 id="keep-moving-heading">KEEP MOVING</h2></div>
+                <small>Pick up where you left off</small>
+              </div>
+              {token && <CurrentlyListening token={token} onPlayTrack={onPickTrack} />}
+              <LastPlayed onPlayTrack={onPickTrack} onUploadRequest={chooseFile} />
+            </div>
+          </div>
+        </section>
+
+        {/* BEST RUNS SECTION (above playlists, top 4 runs adjust dynamically) */}
+        <section className="best-runs-section" aria-labelledby="best-runs-heading">
+          <div className="section-heading-row">
+            <div><h2 id="best-runs-heading">BEST RUNS</h2></div>
+            <small>Top 4 performances</small>
+          </div>
+          <div className="run-list">
+            {slotsToDisplay.map((item, index) =>
+              item ? (
+                <RunCard
+                  key={item.trackId || index}
+                  index={index}
+                  rank={index + 1}
+                  track={item.trackObj || { name: item.trackName, album: { images: [{ url: item.albumArt }] } }}
+                  score={getScorePoints(item)}
+                  rating={item.rating}
+                  songPct={item.songPct}
+                  onPlay={item.trackObj?.localUnavailable ? null : item.trackObj ? () => onPickTrack(item.trackObj) : null}
+                />
+              ) : (
+                <button
+                  key={`empty-run-${index}`}
+                  className={`run-card run-card--${RUN_VARIANTS[index % RUN_VARIANTS.length]} run-card--empty`}
+                  onClick={chooseFile}
+                  title="Play a track to record a run in this slot"
+                >
+                  <span className="run-card-rank-badge">#{index + 1}</span>
+                  <span className="craft-pin craft-pin--tr" aria-hidden="true" />
+                  <span className="track-art-fallback">🏁</span>
+                  <span className="run-card-copy">
+                    <strong>OPEN RUN SLOT</strong>
+                    <small>Upload or play a track</small>
+                  </span>
+                  <span className="run-card-score">
+                    <strong>—</strong>
+                    <em>OPEN</em>
+                  </span>
+                </button>
+              )
+            )}
+          </div>
+        </section>
+
+        {/* RENAMED PLAYLISTS SECTION */}
+        <section className="playlists-section" aria-labelledby="playlists-heading">
+          <div className="section-heading-row playlist-heading-row">
+            <div className="playlist-heading-group">
+              <h2 id="playlists-heading">PLAYLISTS</h2>
+              <span className="playlist-stars" aria-hidden="true">★★★★</span>
+            </div>
+            <button
+              className="view-more-btn"
+              onClick={() => onNavigate("playlists")}
+              aria-label="View more playlists in library"
+            >
+              VIEW MORE →
+            </button>
+          </div>
+
+          <input
+            ref={playlistInputRef}
+            type="file"
+            multiple
+            accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac"
+            className="visually-hidden"
+            onChange={handleImportPlaylistFiles}
+          />
+
+          {loadingPlaylists ? (
+            <div className="playlists-loading-indicator">
+              <span className="spin-slow" style={{ fontSize: 24 }}>🎵</span>
+              <small>LOADING PLAYLISTS...</small>
+            </div>
+          ) : token && topPlaylists.length > 0 ? (
+            <div className="craft-playlist-grid">
+              {topPlaylists.map((pl, idx) => {
+                const isCurrent = activeJourney?.id === pl.id;
+                const journey = isCurrent ? activeJourney : getPlaylistJourney(pl.id);
+                const progress = getJourneyProgress(journey);
+                return (
+                  <PlaylistCraftCard
+                    key={pl.id || idx}
+                    playlist={pl}
+                    index={idx}
+                    isActiveJourney={isCurrent}
+                    journeyProgress={progress}
+                    onResumeOrPlay={handleResumeOrPlayPlaylist}
+                    onOpenPlaylist={handlePlaylistCardClick}
+                  />
                 );
               })}
             </div>
-          </div>
-        )}
-      </div>
+          ) : !token ? (
+            <div className="unconnected-playlists-container">
+              {topPlaylists.length > 0 && (
+                <div className="craft-playlist-grid" style={{ marginBottom: 12 }}>
+                  {topPlaylists.map((pl, idx) => {
+                    const isCurrent = activeJourney?.id === pl.id;
+                    const journey = isCurrent ? activeJourney : getPlaylistJourney(pl.id);
+                    const progress = getJourneyProgress(journey);
+                    return (
+                      <PlaylistCraftCard
+                        key={pl.id || idx}
+                        playlist={pl}
+                        index={idx}
+                        isActiveJourney={isCurrent}
+                        journeyProgress={progress}
+                        onResumeOrPlay={handleResumeOrPlayPlaylist}
+                        onOpenPlaylist={handlePlaylistCardClick}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+              <button className="play-path-card play-path-card--local" onClick={choosePlaylistFiles} style={{ width: "100%", textAlign: "left" }}>
+                <span className="craft-clip craft-clip--tr" aria-hidden="true" />
+                <span className="path-index">LOCAL PLAYLIST</span>
+                <span className="path-copy">
+                  <strong>IMPORT LOCAL PLAYLIST</strong>
+                  <small>Select audio files to create an instant offline playlist</small>
+                </span>
+                <span className="path-action">CHOOSE AUDIO FILES <b>↗</b></span>
+              </button>
+            </div>
+          ) : (
+            <div className="empty-playlists-box" style={{
+              padding: "24px 16px",
+              textAlign: "center",
+              background: "#fbf6ec",
+              border: "1.5px dashed #2b231c",
+              borderRadius: 12,
+              boxShadow: "var(--paper-shadow-sm)",
+            }}>
+              <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.7 }}>📋</div>
+              <strong style={{ fontFamily: "var(--font-display)", fontSize: 13, letterSpacing: 0.5, color: "var(--text-primary)", display: "block" }}>
+                NO PLAYLISTS AVAILABLE
+              </strong>
+              <p style={{ margin: "6px 0 14px", fontSize: 11.5, color: "var(--text-muted)", lineHeight: 1.45 }}>
+                No music playlists found in your Spotify account.
+              </p>
+              <button className="btn-secondary" onClick={choosePlaylistFiles} style={{ fontSize: 10, padding: "6px 14px" }}>
+                + IMPORT LOCAL PLAYLIST
+              </button>
+            </div>
+          )}
+        </section>
 
-      {/* ── Bottom Nav ── */}
-      <div className="bottom-nav">
-        <button className="bottom-nav-btn active" onClick={() => {}}>
-          <span className="nav-icon">🏠</span>
-          HOME
-        </button>
-        <button className="bottom-nav-btn" onClick={() => onNavigate("sprites")}>
-          <span className="nav-icon">🎨</span>
-          SPRITES
-        </button>
-        <button className="bottom-nav-btn disabled" title="Coming soon">
-          <span className="nav-icon">👥</span>
-          FRIENDS
-        </button>
-        <button className="bottom-nav-btn disabled" title="Coming soon">
-          <span className="nav-icon">🏆</span>
-          RANKS
-        </button>
-        <button className="bottom-nav-btn" onClick={() => onNavigate("settings")}>
-          <span className="nav-icon">⚙️</span>
-          SETTINGS
-        </button>
+        {/* TOP TRACKS SECTION (underneath Playlists, with VIEW MORE button) */}
+        <section className="top-tracks-section" aria-labelledby="top-tracks-heading">
+          <div className="section-heading-row">
+            <div className="playlist-heading-group">
+              <h2 id="top-tracks-heading">TOP TRACKS</h2>
+              <span className="playlist-stars" aria-hidden="true">★★★★</span>
+            </div>
+            <button
+              className="view-more-btn"
+              onClick={() => onNavigate("top-tracks")}
+              aria-label="View more top tracks"
+            >
+              VIEW MORE →
+            </button>
+          </div>
+
+          {loadingQuickTracks ? (
+            <div className="playlists-loading-indicator">
+              <span className="spin-slow" style={{ fontSize: 24 }}>♫</span>
+              <small>LOADING TOP TRACKS...</small>
+            </div>
+          ) : topDisplayTracks.length > 0 ? (
+            <div className="mini-track-grid">
+              {topDisplayTracks.map(track => {
+                const best = getBestScore(track.id);
+                const art = track.album?.images?.[1]?.url || track.album?.images?.[0]?.url;
+                const ratingColor = best?.rating ? (RATING_COLORS[best.rating] || "#cf7b52") : null;
+                return (
+                  <button key={track.id} onClick={() => onPickTrack(track)} title={track.name}>
+                    {art ? <img src={art} alt="" /> : <span className="track-art-fallback">♫</span>}
+                    <strong>{track.name}</strong>
+                    <small>{track.artists?.[0]?.name || "Local track"}</small>
+                    {best?.rating && (
+                      <em style={{ background: ratingColor }}>{best.rating}</em>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="empty-tracks-prompt" style={{ textAlign: "center", padding: "16px 12px", background: "#fbf6ec", border: "1.5px dashed #2b231c", borderRadius: 8 }}>
+              <small style={{ color: "var(--text-muted)", display: "block", marginBottom: 6 }}>No top tracks yet</small>
+              <button className="btn-ghost" onClick={chooseFile} style={{ fontSize: 10, padding: "4px 10px" }}>Upload a track to play</button>
+            </div>
+          )}
+                </section>
       </div>
-    </div>
+    </main>
   );
 }

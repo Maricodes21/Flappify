@@ -1,82 +1,8 @@
+import React from "react";
 import { getLastPlayed, getBestScore } from "../services/storage";
+import { formatScorePoints } from "../game/scoring";
 
-const RATING_COLORS = { S: "#FFD700", A: "#4ade80", B: "#60a5fa", C: "#f59e0b", D: "#888" };
-
-// Shows the last song the user played in-game
-export default function LastPlayed({ onPlayTrack }) {
-  const lastPlayed = getLastPlayed();
-
-  if (!lastPlayed) {
-    return (
-      <div className="glass-card fade-in" style={{ padding: 20, textAlign: "center" }}>
-        <div style={{ fontSize: 28, marginBottom: 6, opacity: 0.4 }}>🎮</div>
-        <div style={{ color: "var(--text-dim)", fontSize: 11 }}>No songs played yet — pick one below!</div>
-      </div>
-    );
-  }
-
-  const best = lastPlayed.trackId ? getBestScore(lastPlayed.trackId) : null;
-  const timeSince = lastPlayed.playedAt ? getTimeAgo(lastPlayed.playedAt) : "";
-
-  return (
-    <div className="glass-card fade-in" style={{ padding: 14, display: "flex", gap: 12, alignItems: "center",
-      borderLeft: best ? `3px solid ${RATING_COLORS[best.rating] || "var(--glass-border)"}` : undefined }}>
-      {/* Album art */}
-      <div style={{ flexShrink: 0 }}>
-        {lastPlayed.albumArt ? (
-          <img src={lastPlayed.albumArt} alt="" style={{
-            width: 56, height: 56, borderRadius: 8,
-            border: "1px solid var(--glass-border)"
-          }} />
-        ) : (
-          <div style={{
-            width: 56, height: 56, borderRadius: 8,
-            background: "var(--bg-card)", display: "flex",
-            alignItems: "center", justifyContent: "center",
-            fontSize: 24
-          }}>🎵</div>
-        )}
-      </div>
-
-      {/* Info */}
-      <div style={{ flex: 1, overflow: "hidden" }}>
-        <div style={{ fontSize: 8, color: "var(--text-dim)", fontFamily: "var(--font-display)", letterSpacing: 2, marginBottom: 3 }}>
-          LAST PLAYED {timeSince && `· ${timeSince}`}
-        </div>
-        <div style={{ fontSize: 12, fontWeight: "bold", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 1 }}>
-          {lastPlayed.trackName || "Unknown Track"}
-        </div>
-        <div style={{ fontSize: 9, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 4 }}>
-          {lastPlayed.artistName || ""}
-        </div>
-        {/* Score info */}
-        {best && (
-          <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 9 }}>
-            <span style={{ color: "#f5a623", fontFamily: "var(--font-display)", letterSpacing: 1 }}>
-              {best.totalScore || best.score || 0} PTS
-            </span>
-            {best.rating && (
-              <span style={{ color: RATING_COLORS[best.rating], fontWeight: "bold" }}>
-                {best.rating}
-              </span>
-            )}
-            {best.songPct != null && (
-              <span style={{ color: "var(--text-dim)" }}>{best.songPct}%</span>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Play again */}
-      {lastPlayed.trackObj && (
-        <button className="btn-primary" onClick={() => onPlayTrack(lastPlayed.trackObj)}
-          style={{ padding: "8px 14px", fontSize: 9, letterSpacing: 1, borderRadius: 6, flexShrink: 0 }}>
-          REPLAY ▶
-        </button>
-      )}
-    </div>
-  );
-}
+const RATING_COLORS = { S: "#cf5d44", A: "#82a874", B: "#6ea4b8", C: "#d6a45b", D: "#9e9486" };
 
 function getTimeAgo(timestamp) {
   const diff = Date.now() - timestamp;
@@ -87,4 +13,78 @@ function getTimeAgo(timestamp) {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   return `${days}d ago`;
+}
+
+// Shows the last song the user played in-game with full Daily Roundup card sizing & styling
+export default function LastPlayed({ onPlayTrack, onUploadRequest }) {
+  const lastPlayed = getLastPlayed();
+  const best = lastPlayed?.trackId ? getBestScore(lastPlayed.trackId) : null;
+  const timeSince = lastPlayed?.playedAt ? getTimeAgo(lastPlayed.playedAt) : "";
+
+  const handleClick = () => {
+    if (!lastPlayed) {
+      onUploadRequest?.();
+      return;
+    }
+    if (lastPlayed.trackObj?.localUnavailable) {
+      onUploadRequest?.();
+    } else if (lastPlayed.trackObj) {
+      onPlayTrack(lastPlayed.trackObj);
+    } else {
+      onUploadRequest?.();
+    }
+  };
+
+  return (
+    <button
+      className="daily-roundup-card keep-moving-card"
+      onClick={handleClick}
+      title={lastPlayed?.trackName ? `Play ${lastPlayed.trackName}` : "Choose audio to play"}
+      aria-label="Keep moving - Last played track"
+    >
+      <span className="craft-clip craft-clip--tr" aria-hidden="true" />
+      <span className="craft-pin craft-pin--tl" aria-hidden="true" />
+
+      <div className="daily-roundup-art-preview">
+        {lastPlayed?.albumArt ? (
+          <img src={lastPlayed.albumArt} alt="" className="daily-art-single" loading="lazy" />
+        ) : (
+          <div className="daily-art-placeholder">
+            <span>🎵</span>
+          </div>
+        )}
+      </div>
+
+      <div className="daily-roundup-content">
+        <span className="daily-roundup-tag">
+          {timeSince ? `LAST PLAYED • ${timeSince.toUpperCase()}` : "LAST PLAYED"}
+        </span>
+        <strong className="daily-roundup-title" title={lastPlayed?.trackName || "Ready to Fly"}>
+          {lastPlayed?.trackName || "Ready to Fly"}
+        </strong>
+        <p className="daily-roundup-desc">
+          {lastPlayed ? (
+            <>
+              {lastPlayed.artistName || "Local audio"}
+              {best ? ` · Best: ${formatScorePoints(best)} (${best.rating || "C"}${best.songPct != null ? ` · ${best.songPct}%` : ""})` : " · Ready for another run"}
+            </>
+          ) : (
+            "Select an audio file or connect Spotify to record your rhythm runs and streaks."
+          )}
+        </p>
+        <div className="daily-roundup-action">
+          <span className="daily-play-btn">
+            {!lastPlayed
+              ? "CHOOSE TRACK ↗"
+              : lastPlayed.trackObj?.localUnavailable
+                ? "RE-UPLOAD ↗"
+                : "REPLAY ▶"}
+          </span>
+          <span className="daily-date-label">
+            {best?.rating ? `RANK ${best.rating}` : "KEEP MOVING"}
+          </span>
+        </div>
+      </div>
+    </button>
+  );
 }

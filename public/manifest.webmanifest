@@ -1,0 +1,15 @@
+{
+  "id": "./",
+  "name": "Flappyfy",
+  "short_name": "Flappyfy",
+  "description": "Turn your music into a rhythm flight game.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "theme_color": "#050508",
+  "background_color": "#050508",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

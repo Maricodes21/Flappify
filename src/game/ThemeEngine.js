@@ -9,10 +9,10 @@ import { getSetting } from "../services/storage";
 // ═══════════════════════════════════════════════════════════════
 const classicNeon = {
   id: "classic",
-  name: "Classic Neon",
-  icon: "💚",
-  description: "High-contrast green & black with neon glow",
-  preview: { bg: "#050508", accent: "#1DB954", pipe: "#1DB954" },
+  name: "Album Cover Palette (Default)",
+  icon: "🎨",
+  description: "Dynamic color scheme extracted directly from the song's album cover art",
+  preview: { bg: "#0a120c", accent: "#1DB954", pipe: "#1DB954" },
   cssOverrides: {},
 
   drawBackground(ctx, W, H, g, pal, beatFlash) {
@@ -550,21 +550,12 @@ export function getActiveTheme() {
 
 /**
  * Apply a theme's CSS overrides to the document root.
- * Called when switching themes.
+ * Level themes control gameplay canvas; home themes are governed by data-home-theme attribute.
  */
 export function applyThemeCSS(theme) {
   const root = document.documentElement;
-  // Reset to defaults first
-  const defaults = {
-    "--accent": "#1DB954",
-    "--accent-bright": "#4ade80",
-    "--accent-glow": "rgba(29,185,84,0.5)",
-    "--bg-deep": "#050508",
-    "--bg-card": "#0e0e14",
-  };
-  Object.entries(defaults).forEach(([k, v]) => root.style.setProperty(k, v));
-  // Apply theme overrides
-  if (theme.cssOverrides) {
-    Object.entries(theme.cssOverrides).forEach(([k, v]) => root.style.setProperty(k, v));
-  }
+  // Clean up any legacy inline style overrides so data-home-theme is respected
+  ["--accent", "--accent-bright", "--accent-glow", "--bg-deep", "--bg-card"].forEach(k => {
+    root.style.removeProperty(k);
+  });
 }

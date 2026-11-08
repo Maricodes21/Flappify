@@ -1,7 +1,7 @@
 // audioAnalyzer.js — Real audio beat detection via Web Audio API
-// Analyzes Spotify preview URLs (30s MP3) to extract actual beat times,
-// tempo, energy profile, and section boundaries. Then extrapolates
-// a full-song beat grid that matches the real rhythm.
+// Analyzes browser-readable audio to extract beat times, tempo, energy,
+// and section boundaries. Preview clips are extrapolated; user-provided
+// full tracks retain the structure detected across the complete file.
 //
 // Works in browsers AND in WebView/Capacitor APK builds since it only
 // uses standard Web Audio API (AudioContext, decodeAudioData).
@@ -15,7 +15,7 @@
  * @param {number} [fallbackBpm=120] - BPM to use if detection fails
  * @returns {Promise<{analysis: Object, features: Object}>}
  */
-export async function analyzePreview(previewUrl, fullDurationSec, fallbackBpm = 120) {
+export async function analyzePreview(previewUrl, fullDurationSec, fallbackBpm = 120, options = {}) {
   let detectedBpm = fallbackBpm;
   let detectedBeats = [];
   let energyProfile = [];
@@ -53,19 +53,35 @@ export async function analyzePreview(previewUrl, fullDurationSec, fallbackBpm = 
     // Fall through — we'll use fallbackBpm with the synthetic extrapolation
   }
 
-  // Step 5: Extrapolate full-song beat grid from preview data
-  const fullAnalysis = extrapolateFullSong(
-    detectedBpm || fallbackBpm,
-    detectedBeats,
-    energyProfile,
-    sections,
-    fullDurationSec
-  );
+  // Step 5: Preserve full-file timing for uploads; only extrapolate clips.
+  const fullAnalysis = options.fullTrack
+    ? buildFullTrackAnalysis(
+      detectedBpm || fallbackBpm,
+      detectedBeats,
+      energyProfile,
+      sections,
+      fullDurationSec,
+    )
+    : extrapolateFullSong(
+      detectedBpm || fallbackBpm,
+      detectedBeats,
+      energyProfile,
+      sections,
+      fullDurationSec,
+    );
 
   // Step 6: Build features object (replaces audio-features API)
   const features = buildFeatures(detectedBpm || fallbackBpm, energyProfile);
 
   return { analysis: fullAnalysis, features };
+}
+
+/**
+ * Analyze an entire user-selected audio file. The URL should normally be an
+ * in-memory object URL created with URL.createObjectURL(file).
+ */
+export function analyzeLocalAudio(audioUrl, durationSec, fallbackBpm = 120) {
+  return analyzePreview(audioUrl, durationSec, fallbackBpm, { fullTrack: true });
 }
 
 // ─── Tempo Detection ──────────────────────────────────────────────
@@ -297,6 +313,71 @@ function detectSections(energyProfile, duration) {
   }
 
   return sections;
+}
+
+function getEnergyAt(energyProfile, time) {
+  if (!energyProfile.length) return 0.5;
+  const index = Math.max(0, Math.min(energyProfile.length - 1, Math.round(time * 2)));
+  return energyProfile[index]?.energy ?? 0.5;
+}
+
+/**
+ * Keep the onsets and energy changes detected across a complete local file.
+ * This deliberately avoids the pop-song template used for short previews.
+ */
+function buildFullTrackAnalysis(bpm, detectedBeats, energyProfile, detectedSections, fullDuration) {
+  const beatDur = 60 / bpm;
+  const beats = detectedBeats.map(beat => ({
+    start: beat.start,
+    duration: beatDur,
+    confidence: beat.confidence ?? 0.8,
+  }));
+  const bars = [];
+  for (let index = 0; index < beats.length; index += 4) {
+    bars.push({
+      start: beats[index].start,
+      duration: beatDur * 4,
+      confidence: beats[index].confidence ?? 0.8,
+    });
+  }
+  const sections = detectedSections.map(section => ({
+    ...section,
+    tempo: bpm,
+    key: 7,
+    mode: 1,
+    confidence: 0.75,
+  }));
+  const segments = beats.map((beat, index) => {
+    const energy = getEnergyAt(energyProfile, beat.start);
+    const isKick = index % 4 === 0 || index % 4 === 2;
+    return {
+      start: beat.start,
+      duration: beat.duration,
+      loudness_start: -18 + energy * 10,
+      loudness_max: -14 + energy * 10,
+      pitches: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      timbre: [
+        (isKick ? 50 : 35) * (0.6 + energy * 0.4),
+        isKick ? -30 : 80,
+        20,
+        isKick ? 80 : 50,
+        0, 0, 0, 0, 0, 0, 0, 0,
+      ],
+    };
+  });
+
+  return {
+    beats,
+    bars,
+    sections,
+    segments,
+    meta: {
+      detectedBpm: bpm,
+      beatsFound: beats.length,
+      analyzedDuration: fullDuration,
+      method: "full_track_analysis",
+    },
+  };
 }
 
 // ─── Full Song Extrapolation ──────────────────────────────────────

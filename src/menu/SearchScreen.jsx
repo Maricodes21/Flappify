@@ -1,16 +1,17 @@
 import { useState, useRef, useCallback } from "react";
 import { searchTracks, getAudioFeatures } from "../services/spotify";
 import { getBestScore } from "../services/storage";
+import { formatScorePoints } from "../game/scoring";
 import { computeDifficultyRating } from "../game/beatMapper";
 
 /* ── design tokens ── */
 const FM = "'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif";
-const FF = "Orbitron, monospace";
-const RATING_COLORS = { S: "#FFD700", A: "#4ade80", B: "#60a5fa", C: "#f59e0b", D: "#888" };
+const FF = "var(--font-display)";
+const RATING_COLORS = { S: "#cf5d44", A: "#82a874", B: "#6ea4b8", C: "#d6a45b", D: "#9e9486" };
 const DIFF_DOTS = [
-  { label: "Easy",   color: "#4ade80", range: [0, 1] },
-  { label: "Medium", color: "#f59e0b", range: [1.5, 2] },
-  { label: "Hard",   color: "#ff4466", range: [2.5, 3] },
+  { label: "Easy",   color: "#82a874", range: [0, 1] },
+  { label: "Medium", color: "#d6a45b", range: [1.5, 2] },
+  { label: "Hard",   color: "#cf5d44", range: [2.5, 3] },
 ];
 
 function DiffDot({ stars }) {
@@ -51,7 +52,7 @@ export default function SearchScreen({ token, onPickTrack, onBack }) {
     if (!q.trim()) { setResults([]); setSearched(false); return; }
     setLoading(true);
     setSearched(true);
-    searchTracks(token, q, 20).then(async r => {
+    searchTracks(token, q, 30).then(async r => {
       setResults(r);
       setLoading(false);
       /* background-fetch difficulty ratings */
@@ -112,11 +113,12 @@ export default function SearchScreen({ token, onPickTrack, onBack }) {
             autoFocus
             style={{
               width: "100%", padding: "14px 14px 14px 40px", borderRadius: 10,
-              border: "1px solid var(--border-subtle)", background: "var(--bg-card)",
+              border: "1.5px solid var(--border-subtle)", background: "var(--bg-card)",
               color: "var(--text-primary)", fontSize: 14, fontFamily: FM,
+              boxShadow: "var(--paper-shadow-sm)",
               outline: "none", transition: "border-color 0.15s ease",
             }}
-            onFocus={e => e.target.style.borderColor = "var(--accent)"}
+            onFocus={e => e.target.style.borderColor = "var(--border-subtle)"}
             onBlur={e => e.target.style.borderColor = "var(--border-subtle)"}
           />
           <span style={{
@@ -135,91 +137,59 @@ export default function SearchScreen({ token, onPickTrack, onBack }) {
           </div>
         )}
 
-        {/* ── Results list ── */}
+        {/* ── Results grid ── */}
         {!loading && results.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {results.map(t => {
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 10 }}>
+            {results.map((t, i) => {
               const best = getBestScore(t.id);
               const dr = diffRatings[t.id] || (best?.difficultyStars ? { stars: best.difficultyStars } : null);
               const imgUrl = t.album?.images?.[1]?.url || t.album?.images?.[0]?.url;
               return (
-                <button key={t.id} onClick={() => onPickTrack(t)}
+                <div key={t.id} className="card-interactive" onClick={() => onPickTrack(t)}
                   style={{
-                    all: "unset", boxSizing: "border-box", cursor: "pointer",
-                    display: "flex", alignItems: "center", gap: 12,
-                    padding: "10px 14px", borderRadius: 10, minHeight: 64,
-                    background: "var(--bg-card)",
-                    borderLeft: best
-                      ? `3px solid ${RATING_COLORS[best.rating] || "var(--border-subtle)"}`
-                      : "3px solid transparent",
-                    transition: "background 0.15s ease, transform 0.1s ease",
-                    width: "100%",
-                  }}
-                  onPointerDown={e => e.currentTarget.style.transform = "scale(0.98)"}
-                  onPointerUp={e => e.currentTarget.style.transform = "scale(1)"}
-                  onPointerLeave={e => e.currentTarget.style.transform = "scale(1)"}
-                >
-                  {/* Album art — 52px */}
-                  {imgUrl && (
-                    <img src={imgUrl} alt="" loading="lazy" style={{
-                      width: 52, height: 52, borderRadius: 8, flexShrink: 0,
-                      objectFit: "cover",
-                      border: `1px solid ${best ? RATING_COLORS[best.rating] || "var(--border-subtle)" : "var(--border-subtle)"}`,
-                    }} />
-                  )}
+                    padding: 8, animationDelay: `${i * 20}ms`,
+                    display: "flex", flexDirection: "column", alignItems: "center",
+                    position: "relative",
+                  }}>
+                  {/* Album art */}
+                  <div style={{
+                    width: 80, height: 80, borderRadius: 8, overflow: "hidden",
+                    border: best ? `2px solid ${RATING_COLORS[best.rating] || "var(--border-subtle)"}` : "1.5px solid var(--border-subtle)",
+                    boxShadow: "var(--paper-shadow-sm)",
+                    marginBottom: 6, position: "relative",
+                  }}>
+                    {imgUrl ? (
+                      <img src={imgUrl} alt="" loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : (
+                      <div style={{ width: "100%", height: "100%", background: "var(--bg-card)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24 }}>🎵</div>
+                    )}
+                  </div>
 
-                  {/* Track info */}
-                  <div style={{ overflow: "hidden", flex: 1, minWidth: 0 }}>
-                    <div style={{
-                      fontFamily: FM, fontSize: 13, fontWeight: 600,
-                      color: "var(--text-primary)",
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    }}>{t.name}</div>
+                  {/* Track name */}
+                  <div style={{ fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%", textAlign: "center", letterSpacing: 0.3, marginBottom: 2 }}>
+                    {t.name}
+                  </div>
+                  <div style={{ fontSize: 8, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%", textAlign: "center", marginBottom: 4 }}>
+                    {t.artists?.map(a => a.name).join(", ")}
+                  </div>
 
-                    <div style={{
-                      fontFamily: FM, fontSize: 11, color: "var(--text-muted)",
-                      marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    }}>{t.artists?.map(a => a.name).join(", ")}</div>
+                  {/* Difficulty stars / dot */}
+                  <DiffDot stars={dr?.stars} />
 
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                      <DiffDot stars={dr?.stars} />
-                      {t.duration_ms && (
-                        <span style={{
-                          fontSize: 10, color: "var(--text-dim)", fontFamily: FF,
-                        }}>{fmt(t.duration_ms)}</span>
+                  {/* Score & Rating */}
+                  {best && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3 }}>
+                      <span style={{ fontSize: 9, color: "var(--accent)", fontFamily: "var(--font-display)", fontWeight: "bold" }}>
+                        {formatScorePoints(best)}
+                      </span>
+                      {best.rating && (
+                        <span style={{ fontSize: 9, fontWeight: "bold", color: RATING_COLORS[best.rating] }}>
+                          {best.rating}
+                        </span>
                       )}
                     </div>
-                  </div>
-
-                  {/* Score + play */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-                    {best && (
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{
-                          fontSize: 12, color: "#f5a623",
-                          fontFamily: FF, fontWeight: "bold",
-                        }}>
-                          {best.totalScore || best.score || 0}
-                        </div>
-                        {best.rating && (
-                          <div style={{
-                            fontSize: 13, fontWeight: "bold",
-                            color: RATING_COLORS[best.rating],
-                          }}>{best.rating}</div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Play button — 44x44 minimum tap target */}
-                    <div style={{
-                      width: 44, height: 44, borderRadius: "50%",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      background: "rgba(0, 255, 200, 0.08)",
-                      color: "var(--accent)", fontSize: 18, flexShrink: 0,
-                      transition: "background 0.15s ease",
-                    }}>▶</div>
-                  </div>
-                </button>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -257,14 +227,16 @@ export default function SearchScreen({ token, onPickTrack, onBack }) {
                   style={{
                     all: "unset", cursor: "pointer",
                     display: "flex", alignItems: "center", gap: 6,
-                    padding: "10px 16px", borderRadius: 20,
+                    padding: "8px 14px", borderRadius: 20,
                     background: "var(--bg-card)",
-                    border: "1px solid var(--border-subtle)",
-                    fontFamily: FM, fontSize: 12, color: "var(--text-secondary)",
-                    minHeight: 44, transition: "border-color 0.15s ease, background 0.15s ease",
+                    border: "1.5px solid var(--border-subtle)",
+                    boxShadow: "var(--paper-shadow-sm)",
+                    fontFamily: FM, fontSize: 12, fontWeight: 700, color: "var(--text-primary)",
+                    minHeight: 40, transition: "transform 0.1s ease",
                   }}
-                  onPointerEnter={e => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.background = "rgba(0,255,200,0.04)"; }}
-                  onPointerLeave={e => { e.currentTarget.style.borderColor = "var(--border-subtle)"; e.currentTarget.style.background = "var(--bg-card)"; }}
+                  onPointerDown={e => e.currentTarget.style.transform = "scale(0.97)"}
+                  onPointerUp={e => e.currentTarget.style.transform = "scale(1)"}
+                  onPointerLeave={e => e.currentTarget.style.transform = "scale(1)"}
                 >
                   <span>{sq.emoji}</span>
                   <span>{sq.label}</span>

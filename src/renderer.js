@@ -1,8 +1,12 @@
 import { getActiveTheme } from "./game/ThemeEngine";
+import { getSetting } from "./services/storage";
+import { GAME_HEIGHT as H, GAME_WIDTH as W } from "./game/dimensions";
+import { calculateFlightAccuracy, calculateRhythmPoints, calculateSongProgress, calculateTotalScore } from "./game/scoring";
+import { eventXAt, visibleTimeWindow } from "./game/transport";
 
-const W = 420, H = 600, PIPE_W = 54, BIRD_R = 15;
+const PIPE_W = 54, BIRD_R = 15;
 
-export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, activeSprite, albumImg) {
+export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSprite, albumImg) {
   const [pr, pgc, pb] = pal.rgb || [29, 185, 84];
   const theme = getActiveTheme();
 
@@ -38,8 +42,7 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
     ctx.globalAlpha = 1;
   }
 
-  // ── Chroma Flash (high multiplier pulse) ──────────────────
-  // At x10+ multiplier, shift neon colors
+  // Chroma flash for a high pipe combo
   if ((g.chromaFlash || 0) > 0.01) {
     const chromaHue = (performance.now() / 5) % 360;
     ctx.globalAlpha = g.chromaFlash * 0.12;
@@ -71,7 +74,7 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
     ctx.shadowBlur = 0;
     ctx.font = "10px Space Mono, monospace";
     ctx.fillStyle = "rgba(255,215,0,0.6)";
-    ctx.fillText("DROP INCOMING · x5 MULTIPLIER", W / 2, H / 2 + 30);
+    ctx.fillText("DROP INCOMING", W / 2, H / 2 + 30);
     ctx.globalAlpha = 1;
   }
 
@@ -149,6 +152,23 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
 
     theme.drawPipe(ctx, p.x, p.gy, p.gap, PIPE_W, combinedGlow, pal, { H });
 
+    // A two-tone gap edge remains readable even when album colors are close
+    // to the active theme background.
+    ctx.save();
+    ctx.lineCap = "round";
+    [p.gy, p.gy + p.gap].forEach(edgeY => {
+      ctx.beginPath();
+      ctx.moveTo(p.x - 1, edgeY);
+      ctx.lineTo(p.x + PIPE_W + 1, edgeY);
+      ctx.strokeStyle = "rgba(0,0,0,0.82)";
+      ctx.lineWidth = 5;
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,255,0.62)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    });
+    ctx.restore();
+
     // Downbeat pipe indicator: gold glow ring
     if (p.isDownbeat && combinedGlow > 0.1) {
       ctx.globalAlpha = combinedGlow * 0.5;
@@ -201,9 +221,12 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = "source-over";
 
-  const _dotSpeed = g.speed > 0 ? (g.pipesSpawned <= 5 ? g.speed * (0.8 + g.pipesSpawned * 0.04) : g.speed) : 0;
+  const _dotSpeed = g.speed > 0 ? g.speed : 0;
+  const _dotLevelFade = g.visualStartTime
+    ? Math.max(0, Math.min(1, (performance.now() - g.visualStartTime) / 500))
+    : 1;
 
-  if (g.trailDots && g.trailDots.length > 0 && _dotSpeed > 0 && curPhase === "playing" && (g.pipesSpawned || 0) >= 3) {
+  if (g.trailDots && g.trailDots.length > 0 && _dotSpeed > 0 && getSetting("showTrailDots", true) && curPhase === "playing") {
     const bx = g.bird.x;
     const gt = g.gt || 0;
     const now2 = performance.now();
@@ -212,8 +235,9 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
     const TRAIL_COLOR     = "80,220,255";  // soft cyan/teal — distinct from gold
     const TRAIL_COLOR_HEX = "#50dcff";
 
-    const timeLeft2  = gt + (-80  - bx) / (_dotSpeed * 60);
-    const timeRight2 = gt + (W + 80 - bx) / (_dotSpeed * 60);
+    const trailWindow = visibleTimeWindow(gt, _dotSpeed, bx, -80, W + 80);
+    const timeLeft2 = trailWindow.start;
+    const timeRight2 = trailWindow.end;
 
     // Binary search start index
     let tlo = 0, thi = g.trailDots.length - 1;
@@ -230,7 +254,7 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
       const td = g.trailDots[i];
       if (td.time > timeRight2) break;
 
-      const sx = bx + (td.time - gt) * _dotSpeed * 60;
+      const sx = eventXAt(td.time, gt, _dotSpeed, bx);
       const sy = td.y;
 
       const flashTimer = trailFlashing[i];
@@ -239,7 +263,7 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
       if (trailCollected.has(i) && flashTimer === undefined) continue;
 
       // Smooth right-edge fade-in: 0 at W+60, full at W-120
-      const fadeIn = Math.max(0, Math.min(1, (W + 60 - sx) / 180));
+      const fadeIn = Math.max(0, Math.min(1, (W + 60 - sx) / 180)) * _dotLevelFade;
       if (fadeIn <= 0) continue;
 
       if (flashTimer !== undefined) {
@@ -321,19 +345,18 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
   ctx.restore();
 
   // ══════════════════════════════════════════════════════════
-  // ── BEAT DOTS — Gold Downbeat Checkpoints ──────────────
+  // ── PLAYABLE PULSES — every visible dot is a legal input ─
   // ══════════════════════════════════════════════════════════
   // Only renders during active gameplay (curPhase === "playing") to prevent
   // the scroll-right visual bug during idle/countdown when g.gt is stuck at 0.
-  // All dots are gold/yellow downbeats — no blue dots.
+  // Cyan pulses carry the phrase; gold double-rings mark downbeats.
   ctx.save();
   ctx.setLineDash([]);
   ctx.shadowBlur = 0;
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = "source-over";
 
-  // Only show dots after early speed ramp stabilizes (avoids rightward drift)
-  if (g.beatDots && g.beatDots.length > 0 && _dotSpeed > 0 && curPhase === "playing" && (g.pipesSpawned || 0) >= 3) {
+  if (g.beatDots && g.beatDots.length > 0 && _dotSpeed > 0 && curPhase === "playing") {
     const bx = g.bird.x;
     const gt = g.gt || 0;
     const now = performance.now();
@@ -341,13 +364,13 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
     const collected = g._collectedDots || new Set();
     const flashing = g._flashingDots || {};
 
-    // Gold — the only color used
-    const COLOR     = "#FFD700";
-    const COLOR_RGB = "255,215,0";
+    const DOWNBEAT_COLOR = "#FFD700";
+    const PULSE_COLOR = "#66e7ff";
 
     // ── Gather visible dots via binary search ─────────────
-    const timeLeft  = gt + (-60  - bx) / (_dotSpeed * 60);
-    const timeRight = gt + (W + 120 - bx) / (_dotSpeed * 60);
+    const beatWindow = visibleTimeWindow(gt, _dotSpeed, bx, -60, W + 120);
+    const timeLeft = beatWindow.start;
+    const timeRight = beatWindow.end;
 
     let lo = 0, hi = g.beatDots.length - 1;
     while (lo < hi) {
@@ -360,18 +383,46 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
     for (let i = lo; i < g.beatDots.length; i++) {
       const dot = g.beatDots[i];
       if (dot.time > timeRight) break;
-      const sx = bx + (dot.time - gt) * _dotSpeed * 60;
-      visible.push({ time: dot.time, y: dot.y, sx, idx: i });
+      const sx = eventXAt(dot.time, gt, _dotSpeed, bx);
+      visible.push({
+        time: dot.time,
+        y: dot.y,
+        sx,
+        idx: i,
+        isDownbeat: dot.isDownbeat,
+        isSubdivision: dot.isSubdivision,
+      });
     }
 
-    // ── Draw each gold checkpoint ─────────────────────────
+    // A single restrained rhythm ribbon clarifies the intended flight line
+    // without introducing another set of objects that look tappable.
+    const upcoming = visible.filter(dot => dot.sx >= bx - 4 && !collected.has(dot.idx));
+    if (upcoming.length && getSetting("showTrailingLine", true)) {
+      ctx.save();
+      ctx.globalAlpha = 0.24 * _dotLevelFade;
+      ctx.strokeStyle = PULSE_COLOR;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 8]);
+      ctx.shadowColor = PULSE_COLOR;
+      ctx.shadowBlur = 7;
+      ctx.beginPath();
+      ctx.moveTo(bx, g.bird.y);
+      for (const point of upcoming) ctx.lineTo(point.sx, point.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ── Draw each playable pulse ───────────────────────────
     for (const dot of visible) {
       const sx  = dot.sx;
       const sy  = dot.y;
       const idx = dot.idx;
+      const isDownbeat = dot.isDownbeat;
+      const COLOR = isDownbeat ? DOWNBEAT_COLOR : PULSE_COLOR;
+      const COLOR_RGB = isDownbeat ? "255,215,0" : "102,231,255";
 
       // Fade in from right screen edge so dots don't pop in abruptly
-      const rightEdgeFade = Math.max(0, Math.min(1, (W + 60 - sx) / 200));
+      const rightEdgeFade = Math.max(0, Math.min(1, (W + 60 - sx) / 200)) * _dotLevelFade;
       if (rightEdgeFade <= 0) continue;
 
       // ─ Flash animation (just collected) ─
@@ -394,14 +445,15 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
       // ─ Skip fully collected dots ─
       if (collected.has(idx)) continue;
 
-      // ─ Proximity fill: 0 at 200px away → 1.0 at ≤20px ─
-      const dx   = Math.abs(bx - sx);
-      const fill = Math.max(0, Math.min(1, 1 - (dx - 20) / 180));
+      // Time-based approach fill remains stable across screen speeds.
+      const timeUntil = dot.time - gt;
+      const approachTime = g.approachTime || 1.9;
+      const fill = Math.max(0, Math.min(1, 1 - timeUntil / approachTime));
 
       // Pulse on the beat + proximity-driven size
       const pulse    = Math.sin(now / 300 + idx * 0.7) * 0.5 + 0.5;
       const beatPulse = beatGlow * 3;
-      const R = 10 + pulse * 1.5 + beatPulse;
+      const R = (isDownbeat ? 11 : dot.isSubdivision ? 7.5 : 8.5) + pulse * 1.2 + beatPulse;
 
       // ─ Outer radial glow ─
       const glowAlpha = (0.08 + fill * 0.28 + beatGlow * 0.15) * rightEdgeFade;
@@ -453,14 +505,16 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
         }
       }
 
-      // ─ Double outer ring (downbeat indicator — always shown) ─
-      ctx.globalAlpha = (0.3 + pulse * 0.2 + beatGlow * 0.2) * rightEdgeFade;
-      ctx.strokeStyle = COLOR;
-      ctx.lineWidth   = 1.2;
-      ctx.shadowBlur  = 6;
-      ctx.beginPath();
-      ctx.arc(sx, sy, R + 7 + pulse * 3, 0, Math.PI * 2);
-      ctx.stroke();
+      // Downbeats receive the only double ring, preserving a clear hierarchy.
+      if (isDownbeat) {
+        ctx.globalAlpha = (0.3 + pulse * 0.2 + beatGlow * 0.2) * rightEdgeFade;
+        ctx.strokeStyle = COLOR;
+        ctx.lineWidth   = 1.2;
+        ctx.shadowBlur  = 6;
+        ctx.beginPath();
+        ctx.arc(sx, sy, R + 7 + pulse * 3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
 
       // ─ TAP hint when nearly full ─
       if (fill > 0.7 && fill < 0.98) {
@@ -595,19 +649,6 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
     ctx.fillRect(i * vw + 1, H - 68 - h, vw - 2, h);
   });
 
-  // ── Score multiplier badge ────────────────────────────────
-  if (g.scoreMultiplier > 1 && g.multiplierTimer > 0 && curPhase === "playing") {
-    const multAlpha = Math.min(1, g.multiplierTimer);
-    ctx.globalAlpha = multAlpha;
-    ctx.font = "bold 13px Orbitron, monospace";
-    ctx.textAlign = "center";
-    ctx.fillStyle = g.scoreMultiplier >= 5 ? "#FFD700" : g.scoreMultiplier >= 3 ? "#ff6b2b" : "#4ade80";
-    ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 10;
-    ctx.fillText(`×${g.scoreMultiplier} MULTIPLIER`, W / 2, 92);
-    ctx.shadowBlur = 0;
-    ctx.globalAlpha = 1;
-  }
-
   // ── Overdrive Mode indicator ──────────────────────────────
   if (inOverdrive && curPhase === "playing") {
     const overHue = (performance.now() / 12) % 360;
@@ -647,8 +688,7 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
   ctx.fillStyle = "#fff";
   ctx.font = "bold 44px Orbitron, monospace";
   ctx.textAlign = "center";
-  // Display running total score instead of pipe count
-  const liveTotal = (g.score * 50) + (g.rhythmScore || 0) + (g.maxCombo || 0) * 20;
+  const liveTotal = calculateTotalScore(g);
   ctx.fillText(liveTotal.toLocaleString(), W / 2, 56);
   ctx.shadowBlur = 0;
 
@@ -663,24 +703,24 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
     ctx.shadowBlur = 0;
   }
 
-  // BPM / Best — neutral secondary color, not palette accent
-  ctx.font = "11px Space Mono, monospace";
-  ctx.textAlign = "left";
-  ctx.fillStyle = "rgba(176,176,192,0.65)"; // --text-secondary at 65%
-  ctx.fillText(`${Math.round(g.bpm || f.tempo || 0)} BPM`, 10, 18);
-  ctx.textAlign = "right";
-  ctx.fillStyle = "rgba(255,255,255,0.35)";
-  ctx.fillText(`BEST ${bestRef.current.toLocaleString()}`, W - 10, 18);
-
   // Floating texts
   g.floats.forEach(ft => {
+    const gradeMatch = /^(PERFECT|GREAT|GOOD)(?=\b|\s|[+×★])/i.exec(ft.text);
+    if (gradeMatch && !getSetting("showGrades", true)) return;
     ctx.globalAlpha = Math.min(1, ft.life);
     ctx.font = `bold ${ft.size}px Orbitron, monospace`;
     ctx.textAlign = "center";
-    ctx.fillStyle = ft.color;
-    ctx.shadowColor = ft.color;
+    const colorblindMode = getSetting("colorblindMode", false);
+    const gradeColors = { PERFECT: "#56B4E9", GREAT: "#E69F00", GOOD: "#CC79A7" };
+    const accessibleColor = gradeMatch && colorblindMode ? gradeColors[gradeMatch[1].toUpperCase()] : null;
+    const gradeSymbols = { PERFECT: "●", GREAT: "▲", GOOD: "■" };
+    const label = gradeMatch && colorblindMode
+      ? `${gradeSymbols[gradeMatch[1].toUpperCase()]} ${ft.text}`
+      : ft.text;
+    ctx.fillStyle = accessibleColor || ft.color;
+    ctx.shadowColor = accessibleColor || ft.color;
     ctx.shadowBlur = 8;
-    ctx.fillText(ft.text, ft.x, ft.y);
+    ctx.fillText(label, ft.x, ft.y);
     ctx.shadowBlur = 0;
 
     // Pop-Art: trigger ZAP/POW for perfect grades
@@ -695,30 +735,37 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
     ctx.fillStyle = "rgba(0,0,0,0.5)";
     ctx.fillRect(0, 0, W, H);
     ctx.textAlign = "center";
-    ctx.font = "bold 22px Orbitron, monospace";
+    ctx.font = "bold 24px Orbitron, monospace";
     ctx.shadowColor = pal.glow; ctx.shadowBlur = 24;
     ctx.fillStyle = "#fff";
-    ctx.fillText("PRESS SPACE", W / 2, H / 2 - 16);
-    ctx.fillText("OR  TAP  TO  FLY", W / 2, H / 2 + 16);
+    ctx.fillText("TAP TO FLY", W / 2, H / 2 - 10);
     ctx.shadowBlur = 0;
-    ctx.font = "11px Space Mono, monospace";
+    ctx.font = "12px Space Mono, monospace";
     ctx.fillStyle = pal.base;
-    ctx.fillText("gap & speed tuned to your track", W / 2, H / 2 + 50);
+    ctx.fillText("RIDE THE BEAT", W / 2, H / 2 + 28);
   }
 
-  // Countdown overlay
-  if (curPhase === "countdown") {
-    ctx.fillStyle = "rgba(0,0,0,0.45)";
+  // Keep the countdown on screen through audio startup, then fade it into play.
+  const goFade = curPhase === "playing" && g.goStartedAt && !isPaused
+    ? Math.max(0, 1 - Math.max(0, g.lastT - g.goStartedAt) / 350)
+    : 0;
+  if (curPhase === "countdown" || goFade > 0) {
+    const opacity = goFade > 0 ? goFade : 1;
+    ctx.save();
+    ctx.fillStyle = `rgba(0,0,0,${0.45 * opacity})`;
     ctx.fillRect(0, 0, W, H);
     ctx.textAlign = "center";
 
-    const beatNum = Math.ceil(g.countdownBeats - g.countdownProgress);
-    const beatFrac = g.countdownProgress % 1;
+    const countdownDuration = g.countdownDurationMs || 3000;
+    const elapsedMs = Math.min(countdownDuration, g.countdownElapsedMs || 0);
+    const remainingMs = Math.max(0, countdownDuration - elapsedMs);
+    const beatNum = Math.max(1, Math.ceil(remainingMs / 1000));
+    const beatFrac = remainingMs === 0 || goFade > 0 ? 1 : (elapsedMs % 1000) / 1000;
     const scale = 1 + (1 - beatFrac) * 0.4;
 
     // Pulsing ring synced to BPM
     const ringRadius = 60 + (1 - beatFrac) * 30;
-    ctx.globalAlpha = 0.2 + (1 - beatFrac) * 0.3;
+    ctx.globalAlpha = opacity * (0.2 + (1 - beatFrac) * 0.3);
     ctx.strokeStyle = pal.bright;
     ctx.lineWidth = 3;
     ctx.shadowColor = pal.glow; ctx.shadowBlur = 20;
@@ -730,40 +777,71 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
     ctx.translate(W / 2, H / 2);
     ctx.scale(scale, scale);
 
-    if (beatNum > 0) {
-      ctx.font = "bold 72px Orbitron, monospace";
-      ctx.fillStyle = "#fff";
-      ctx.shadowColor = pal.glow; ctx.shadowBlur = 40;
-      ctx.globalAlpha = 0.5 + beatFrac * 0.5;
-      ctx.fillText(beatNum.toString(), 0, 24);
-    } else {
-      ctx.font = "bold 48px Orbitron, monospace";
-      ctx.fillStyle = pal.bright;
-      ctx.shadowColor = pal.glow; ctx.shadowBlur = 40;
-      ctx.fillText("GO!", 0, 24);
-    }
+    ctx.font = "bold 72px Orbitron, monospace";
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = pal.glow; ctx.shadowBlur = 40;
+    ctx.globalAlpha = opacity * (0.5 + beatFrac * 0.5);
+    ctx.fillText(goFade > 0 ? "GO" : String(beatNum), 0, 24);
     ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
     ctx.restore();
 
-    ctx.font = "12px Space Mono, monospace";
-    ctx.fillStyle = `rgba(${pr},${pgc},${pb},0.6)`;
-    ctx.fillText(`${Math.round(g.bpm || f.tempo || 120)} BPM`, W / 2, H / 2 + 60);
-    ctx.font = "10px Space Mono, monospace";
-    ctx.fillStyle = "rgba(255,255,255,0.3)";
-    ctx.fillText("feel the rhythm...", W / 2, H / 2 + 80);
+    if (!goFade) {
+      ctx.font = "12px Space Mono, monospace";
+      ctx.fillStyle = `rgba(${pr},${pgc},${pb},0.78)`;
+      const waitingMs = g.lastT - g.countdownStartedAt - countdownDuration;
+      ctx.fillText(g.countdownHolding && waitingMs > 250 ? "SYNCING MUSIC…" : "MUSIC READY", W / 2, H / 2 + 68);
+    }
+    ctx.restore();
   }
 
-  // Dead overlay
-  if (curPhase === "dead") {
+  // Spotify synchronization overlay. Gameplay remains frozen until the SDK
+  // confirms that the requested track is actively playing.
+  if (curPhase === "syncing" || curPhase === "sync-error") {
+    ctx.fillStyle = "rgba(0,0,0,0.68)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = "center";
+
+    if (curPhase === "syncing") {
+      const angle = (performance.now() / 650) % (Math.PI * 2);
+      ctx.save();
+      ctx.translate(W / 2, H / 2 - 52);
+      ctx.rotate(angle);
+      ctx.strokeStyle = pal.bright;
+      ctx.lineWidth = 5;
+      ctx.lineCap = "round";
+      ctx.shadowColor = pal.glow;
+      ctx.shadowBlur = 18;
+      ctx.beginPath();
+      ctx.arc(0, 0, 24, 0, Math.PI * 1.45);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.font = "bold 22px Orbitron, monospace";
+    ctx.fillStyle = curPhase === "sync-error" ? "#ff6680" : "#fff";
+    ctx.shadowColor = curPhase === "sync-error" ? "#ff2244" : pal.glow;
+    ctx.shadowBlur = 20;
+    ctx.fillText(g.syncMessage || (curPhase === "syncing" ? "LOADING SPOTIFY" : "MUSIC DIDN'T START"), W / 2, H / 2 + 12);
+    ctx.shadowBlur = 0;
+    ctx.font = "12px Space Mono, monospace";
+    ctx.fillStyle = curPhase === "sync-error" ? "#fff" : pal.base;
+    ctx.fillText(g.syncDetail || (curPhase === "syncing" ? "WAITING FOR THE TRACK TO START…" : "TAP TO RETRY"), W / 2, H / 2 + 48);
+  }
+
+  // Results overlay
+  if (curPhase === "dead" || curPhase === "completed") {
+    const completed = curPhase === "completed";
+    const resultColor = completed ? pal.bright : "#ff4466";
+    const resultGlow = completed ? pal.glow : "#ff2244";
     ctx.fillStyle = "rgba(0,0,0,0.75)";
     ctx.fillRect(0, 0, W, H);
     ctx.textAlign = "center";
 
     ctx.font = "900 36px Orbitron, monospace";
-    ctx.shadowColor = "#ff2244"; ctx.shadowBlur = 28;
-    ctx.fillStyle = "#ff4466";
-    ctx.fillText("GAME OVER", W / 2, H / 2 - 140);
+    ctx.shadowColor = resultGlow; ctx.shadowBlur = 28;
+    ctx.fillStyle = resultColor;
+    ctx.fillText(completed ? "LEVEL CLEARED" : "GAME OVER", W / 2, H / 2 - 140);
     ctx.shadowBlur = 0;
 
     const totalScore = g.totalScore || 0;
@@ -773,26 +851,24 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
     ctx.fillText(totalScore.toLocaleString(), W / 2, H / 2 - 90);
     ctx.shadowBlur = 0;
 
-    ctx.font = "9px Space Mono, monospace";
+    ctx.font = "11px Space Mono, monospace";
     ctx.fillStyle = "#f5a623";
-    ctx.fillText("TOTAL SCORE", W / 2, H / 2 - 72);
+    ctx.fillText("TOTAL POINTS", W / 2, H / 2 - 72);
 
-    const currentScore = totalScore;
     const bestScore = bestRef.current;
-    if (currentScore >= bestScore && currentScore > 0) {
+    if (g.isNewBest) {
       ctx.font = "bold 13px Orbitron, monospace";
       ctx.fillStyle = "#FFD700";
       ctx.shadowColor = "#FFD700"; ctx.shadowBlur = 12;
       ctx.fillText("★ NEW BEST! ★", W / 2, H / 2 - 54);
       ctx.shadowBlur = 0;
     } else if (bestScore > 0) {
-      ctx.font = "11px Space Mono, monospace";
-      ctx.fillStyle = "#666";
-      ctx.fillText(`best: ${bestScore.toLocaleString()}`, W / 2, H / 2 - 54);
+      ctx.font = "12px Space Mono, monospace";
+      ctx.fillStyle = "#9090a0";
+      ctx.fillText(`BEST ${bestScore.toLocaleString()}`, W / 2, H / 2 - 54);
     }
 
-    const dur = g.songDur || 210;
-    const pct = Math.min(100, Math.round((g.gt / dur) * 100));
+    const pct = calculateSongProgress(g);
     const barW = 180, barH = 5, barX = (W - barW) / 2, barY = H / 2 - 36;
     ctx.fillStyle = "#1a1a28";
     ctx.beginPath(); ctx.roundRect(barX, barY, barW, barH, 3); ctx.fill();
@@ -800,67 +876,50 @@ export function drawGame(ctx, g, pal, f, curPhase, scoreRef, bestRef, isPaused, 
     progGrad.addColorStop(0, pal.base); progGrad.addColorStop(1, pal.bright);
     ctx.fillStyle = progGrad;
     ctx.beginPath(); ctx.roundRect(barX, barY, barW * (pct / 100), barH, 3); ctx.fill();
-    ctx.font = "bold 10px Space Mono, monospace";
+    ctx.font = "bold 11px Space Mono, monospace";
     ctx.fillStyle = pal.bright;
     ctx.fillText(`${pct}% of song`, W / 2, barY + 16);
 
-    ctx.font = "10px Space Mono, monospace";
-    ctx.fillStyle = "#777";
-    const accuracy = g.totalPipes > 0 ? Math.round(((g.perfects + g.greats) / g.totalPipes) * 100) : 0;
-    const beatAccuracy = g.beatTaps > 0 ? Math.round((g.onBeatTaps / g.beatTaps) * 100) : 0;
+    ctx.font = "12px Space Mono, monospace";
+    ctx.fillStyle = "#9090a0";
+    const rhythmAccuracy = g.rhythmAccuracy || 0;
 
     const breakdownY = H / 2 + 4;
 
+    // Rhythm accuracy
     ctx.textAlign = "left";
-    ctx.fillStyle = "#666";
-    ctx.fillText("Pipes:", W / 2 - 85, breakdownY);
+    ctx.fillStyle = "#9090a0";
+    ctx.fillText("Rhythm:", W / 2 - 85, breakdownY);
+    ctx.textAlign = "right";
+    ctx.fillStyle = rhythmAccuracy >= 55 ? "#FFD700" : "#c0c0cc";
+    ctx.fillText(`${rhythmAccuracy}%  ·  ${calculateRhythmPoints(g)} pts`, W / 2 + 85, breakdownY);
+
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#9090a0";
+    ctx.fillText("Flight:", W / 2 - 85, breakdownY + 22);
     ctx.textAlign = "right";
     ctx.fillStyle = "#aaa";
-    ctx.fillText(`${g.score} × 50 = ${g.score * 50}`, W / 2 + 85, breakdownY);
+    ctx.fillText(`${g.flightAccuracy || 0}%  ·  ${g.totalPipes || 0} pts`, W / 2 + 85, breakdownY + 22);
 
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#666";
-    ctx.fillText("Rhythm:", W / 2 - 85, breakdownY + 16);
-    ctx.textAlign = "right";
-    ctx.fillStyle = beatAccuracy >= 50 ? "#FFD700" : "#aaa";
-    ctx.fillText(`${g.rhythmScore || 0}  (${beatAccuracy}% on beat)`, W / 2 + 85, breakdownY + 16);
-
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#666";
-    ctx.fillText("Progress:", W / 2 - 85, breakdownY + 32);
-    ctx.textAlign = "right";
-    ctx.fillStyle = "#aaa";
-    ctx.fillText(`${pct} × 10 = ${pct * 10}`, W / 2 + 85, breakdownY + 32);
-
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#666";
-    ctx.fillText("Combo:", W / 2 - 85, breakdownY + 48);
-    ctx.textAlign = "right";
-    ctx.fillStyle = "#aaa";
-    ctx.fillText(`×${g.maxCombo} × 20 = ${g.maxCombo * 20}`, W / 2 + 85, breakdownY + 48);
-
+    // Perfects and Misses
     ctx.textAlign = "center";
-    ctx.font = "10px Space Mono, monospace";
-    ctx.fillStyle = "#777";
-    ctx.fillText(`${g.perfects}P  ${g.greats}G  ${g.goods}OK  ·  ${accuracy}% accuracy`, W / 2, breakdownY + 68);
-    ctx.fillText(`×${g.maxCombo} max combo  ·  ${g.nearMisses} near misses`, W / 2, breakdownY + 82);
+    ctx.font = "11px Space Mono, monospace";
+    ctx.fillStyle = "#a0a0b0";
+    ctx.fillText(`${g.rhythmPerfects || 0} PERFECT  ·  ${g.rhythmMisses || 0} MISS  ·  ${g.maxRhythmStreak || 0} STREAK`, W / 2, breakdownY + 50);
 
-    let rating = "D";
-    if (accuracy >= 90 && totalScore >= 2000) rating = "S";
-    else if (accuracy >= 75 && totalScore >= 1000) rating = "A";
-    else if (accuracy >= 60 && totalScore >= 500) rating = "B";
-    else if (accuracy >= 40 && totalScore >= 200) rating = "C";
+    const rating = g.rating || "D";
     const ratingColors = { S: "#FFD700", A: "#4ade80", B: "#60a5fa", C: "#f59e0b", D: "#888" };
-    ctx.font = "bold 26px Orbitron, monospace";
+    ctx.font = "bold 30px Orbitron, monospace";
     ctx.fillStyle = ratingColors[rating] || "#888";
     ctx.shadowColor = ratingColors[rating] || "#888";
     ctx.shadowBlur = 12;
-    ctx.fillText(rating, W / 2, breakdownY + 112);
+    const stars = Math.max(0, Math.min(3, g.masteryStars || 0));
+    ctx.fillText(`${rating}${stars ? `  ${"⭐".repeat(stars)}${"☆".repeat(3 - stars)}` : ""}`, W / 2, breakdownY + 80);
     ctx.shadowBlur = 0;
 
-    ctx.fillStyle = "rgba(255,255,255,0.35)";
-    ctx.font = "10px Space Mono, monospace";
-    ctx.fillText("tap  or  space  to  retry", W / 2, breakdownY + 134);
+    ctx.fillStyle = "rgba(255,255,255,0.72)";
+    ctx.font = "12px Space Mono, monospace";
+    ctx.fillText(completed ? "NEXT SONG OR REPLAY BELOW" : "TAP TO RETRY", W / 2, breakdownY + 110);
   }
 
   // Pause overlay — now handled by HTML overlay in GameScreen (screens.jsx)

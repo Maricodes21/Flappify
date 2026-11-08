@@ -47,16 +47,14 @@ export default function CurrentlyListening({ token, onPlayTrack }) {
         {albumArt && (
           <img src={albumArt} alt="" style={{
             width: 56, height: 56, borderRadius: 8,
-            border: "1px solid var(--accent)",
-            boxShadow: "0 0 16px var(--accent-glow-subtle)"
+            border: "1.5px solid var(--border-subtle)"
           }} />
         )}
         <div style={{
           position: "absolute", top: -4, right: -4,
           width: 10, height: 10, borderRadius: "50%",
           background: "var(--accent)",
-          boxShadow: "0 0 8px var(--accent-glow)",
-          animation: "pulse-glow 2s ease-in-out infinite"
+          border: "1.5px solid var(--border-subtle)"
         }} />
       </div>
 

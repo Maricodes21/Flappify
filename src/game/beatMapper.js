@@ -1,3 +1,6 @@
+import { GAME_HEIGHT, GAME_WIDTH } from "./dimensions.js";
+import { buildRhythmSchedule } from "./rhythmMapper.js";
+
 // beatMapper.js — Rhythm-driven pipe schedule generator
 // Uses Spotify audio_analysis (beats, bars, sections, segments) to create
 // a pipe spawn schedule where placement is tied to musical structure.
@@ -146,6 +149,10 @@ function getSectionEnergy(sections, time) {
  * @returns {Object} { schedule, sections, bars, beats }
  */
 export function buildPipeSchedule(analysis, features, difficulty, diffSettings, baseGap) {
+  return buildRhythmSchedule(analysis, features, difficulty, diffSettings, baseGap);
+}
+
+function buildLegacyPipeSchedule(analysis, features, difficulty, diffSettings, baseGap) {
   const beats = (analysis?.beats || []);
   const bars = (analysis?.bars || []);
   const sections = (analysis?.sections || []).map(s => ({
@@ -178,7 +185,7 @@ export function buildPipeSchedule(analysis, features, difficulty, diffSettings, 
   // Then place pipe gaps centered on where the bird would be at pipe arrival time.
   const GRAVITY = 0.55;   // matches game physics (SpotifyFlappy.jsx line 45)
   const FLAP_VEL = -9.0;  // matches game FLAP_VEL exactly (was -7.5 — 20% too weak)
-  const H = 600;           // canvas height
+  const H = GAME_HEIGHT;   // canvas height
   const GROUND = H - 70;
   const CEILING = 0;
   const BIRD_X = 80;
@@ -246,7 +253,7 @@ export function buildPipeSchedule(analysis, features, difficulty, diffSettings, 
   let beatCounter = 0;
   let prevSectionStart = -1;
   // How long a pipe takes to scroll from right edge to bird X
-  const pipeScrollTime = (420 - BIRD_X) / (speed * 60);
+  const pipeScrollTime = (GAME_WIDTH - BIRD_X) / (speed * 60);
 
   for (let i = 0; i < beats.length; i++) {
     beatCounter++;

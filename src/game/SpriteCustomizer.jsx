@@ -104,16 +104,17 @@ export default function SpriteCustomizer({ onBack, palette }) {
         </div>
 
         {/* Tab toggle */}
-        <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
           {[{ k: "sprites", l: "🎨 SPRITES", icon: "🎨" }, { k: "themes", l: "🎭 THEMES", icon: "🎭" }].map(t => (
             <button key={t.k} onClick={() => setTab(t.k)}
               style={{
                 flex: 1, padding: "10px 12px", borderRadius: 8,
                 background: tab === t.k ? "var(--accent)" : "var(--bg-card)",
-                border: `1px solid ${tab === t.k ? "var(--accent)" : "var(--border-subtle)"}`,
-                color: tab === t.k ? "#000" : "var(--text-muted)",
-                fontSize: 11, fontFamily: "var(--font-display)", fontWeight: "bold",
+                border: "1.5px solid var(--border-subtle)",
+                color: tab === t.k ? "#ffffff" : "var(--text-primary)",
+                fontSize: 11, fontFamily: "var(--font-music)", fontWeight: 800,
                 letterSpacing: 1.5, cursor: "pointer",
+                boxShadow: "var(--paper-shadow-sm)",
                 transition: "all var(--transition-fast)",
               }}>
               {t.l}
