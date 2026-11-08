@@ -716,7 +716,7 @@ export function GameScreen({ W, H, canvasRef, track, features, chartAnalysis, pa
             </div>
             <div style={{ fontFamily: FF, fontSize: 11, color: "#a0a0b0", letterSpacing: 1 }}>
               BEST <span style={{ color: "#FFD700", fontSize: 13 }}>{best.toLocaleString()}</span>
-              {combo > 1 && <span style={{ fontSize: 10, color: "#4ade80", marginLeft: 8 }}>×{combo}</span>}
+              {combo > 1 && <span style={{ fontSize: 10, color: "#4ade80", marginLeft: 8 }}>{combo} COMBO</span>}
             </div>
           </footer>
 

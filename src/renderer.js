@@ -699,7 +699,7 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
     ctx.fillStyle = g.combo >= 10 ? "#FFD700" : pal.bright;
     ctx.shadowColor = g.combo >= 10 ? "#FFD700" : pal.glow;
     ctx.shadowBlur = 10;
-    ctx.fillText(`×${g.combo}`, W / 2, 78);
+    ctx.fillText(`${g.combo} COMBO`, W / 2, 78);
     ctx.shadowBlur = 0;
   }
 
