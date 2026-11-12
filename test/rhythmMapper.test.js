@@ -59,3 +59,20 @@ test("authored tap impulses lead ballistically to the next rhythm target", () =>
     assert.ok(Math.abs(predictedY - next.y) < 0.001);
   }
 });
+
+test("tracks with the same tempo can have different paths that repeat on replay", () => {
+  const analysis = generateSyntheticAnalysis(120, 60);
+  const features = { tempo: 120, energy: 0.7 };
+  const mapTrack = id => buildRhythmSchedule(analysis, features, "normal", { gapM: 1 }, 175, id);
+  const first = mapTrack("track-a");
+  const second = mapTrack("track-b");
+  const replay = mapTrack("track-a");
+
+  assert.deepEqual(first.schedule, replay.schedule);
+  assert.deepEqual(first.beatDots, replay.beatDots);
+  assert.deepEqual(first.schedule.map(gate => gate.hitTime), second.schedule.map(gate => gate.hitTime));
+  assert.notDeepEqual(first.schedule.map(gate => gate.gapY), second.schedule.map(gate => gate.gapY));
+  const firstSection = first.beatDots.filter(dot => dot.time < 15);
+  const secondSection = first.beatDots.filter(dot => dot.time >= 15);
+  assert.notEqual(Math.sign(firstSection[1].y - firstSection[0].y), Math.sign(secondSection[1].y - secondSection[0].y));
+});

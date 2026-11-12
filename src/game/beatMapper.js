@@ -148,8 +148,8 @@ function getSectionEnergy(sections, time) {
  * @param {number} baseGap - base gap size in pixels
  * @returns {Object} { schedule, sections, bars, beats }
  */
-export function buildPipeSchedule(analysis, features, difficulty, diffSettings, baseGap) {
-  return buildRhythmSchedule(analysis, features, difficulty, diffSettings, baseGap);
+export function buildPipeSchedule(analysis, features, difficulty, diffSettings, baseGap, trackId) {
+  return buildRhythmSchedule(analysis, features, difficulty, diffSettings, baseGap, trackId);
 }
 
 function buildLegacyPipeSchedule(analysis, features, difficulty, diffSettings, baseGap) {

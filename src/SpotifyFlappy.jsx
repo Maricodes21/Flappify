@@ -1304,7 +1304,7 @@ export default function SpotifyFlappy() {
     const gap = BASE_GAP * (1.25 - energy * 0.45) * dm.gapM;
 
     // Build rhythm-driven pipe schedule from audio analysis
-    const pipeData = buildPipeSchedule(anaRef.current, f, diffRef.current, dm, BASE_GAP);
+    const pipeData = buildPipeSchedule(anaRef.current, f, diffRef.current, dm, BASE_GAP, trackRef.current?.id);
     const { schedule: pipeSchedule, sections, bars, beats, barStarts, beatDots, trailDots } = pipeData;
     const speed = pipeData.speed || BASE_SPEED * dm.spdM;
     const rhythmPhysics = pipeData.physics || { gravity: GRAVITY, flapVelocity: FLAP_VEL, maxUpVelocity: MAX_UP_VEL };

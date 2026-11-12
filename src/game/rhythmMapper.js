@@ -23,6 +23,21 @@ const RHYTHM_TUNING = {
 
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
 
+const FLIGHT_PHRASES = [
+  // Rolling arcs, a climb with a return, and short alternating turns.
+  [0, .55, .9, 1, .8, .4, 0, -.55, -.9, -1, -.8, -.4],
+  [0, -.35, -.7, -1, -1, -.85, -.4, .15, .65, .9, .55, .25],
+  [0, .6, .95, .55, 0, -.65, -.95, -.55, 0, .5, .75, .4],
+];
+
+function trackPatternOffset(trackId) {
+  let hash = 0;
+  for (const character of trackId) {
+    hash = (Math.imul(hash, 31) + character.codePointAt(0)) >>> 0;
+  }
+  return hash % FLIGHT_PHRASES.length;
+}
+
 function median(values, fallback) {
   if (!values.length) return fallback;
   const sorted = [...values].sort((a, b) => a - b);
@@ -122,7 +137,7 @@ function sectionAt(sections, time) {
   return active;
 }
 
-export function buildRhythmSchedule(analysis, features, difficulty, diffSettings, baseGap) {
+export function buildRhythmSchedule(analysis, features, difficulty, diffSettings, baseGap, trackId = "") {
   const beats = analysis?.beats || [];
   const bars = analysis?.bars || [];
   const bpm = Math.max(50, features?.tempo || 120);
@@ -156,20 +171,22 @@ export function buildRhythmSchedule(analysis, features, difficulty, diffSettings
   const safeBottom = ground - 30 - responsiveGapFloor / 2;
   const centerY = (safeTop + safeBottom) / 2;
 
-  // One actionable target per pulse. The eight-pulse wave acts as a readable
-  // phrase, giving the song visible direction without random vertical jumps.
+  // Start each track on a stable phrase, then change the shape with the music.
+  const patternOffset = trackPatternOffset(trackId);
+  let phraseStart = 0;
+  let sectionIndex = 0;
   const beatDots = pulses.map((pulse, index) => {
-    const section = sectionAt(sections, pulse.time);
+    while (sections[sectionIndex + 1]?.start <= pulse.time) {
+      sectionIndex++;
+      phraseStart = index;
+    }
+    const section = sections[sectionIndex] || { energy: 0.5 };
     const amplitude = tuning.pathAmplitude * (0.78 + section.energy * 0.28);
-    // Twelve pulses create alternating rises, falls, and returns. Sampling this
-    // path every 3–4 pulses gives gates different musical directions instead
-    // of placing every downbeat at the same vertical midpoint.
-    const phrasePhase = index * (Math.PI / 6) + ((section.start || 0) % 8) * 0.08;
-    const primaryWave = Math.sin(phrasePhase) * amplitude;
-    const secondaryWave = Math.sin(index * Math.PI / 2) * amplitude * 0.12;
+    const phrase = FLIGHT_PHRASES[(patternOffset + sectionIndex) % FLIGHT_PHRASES.length];
+    const heightOffset = phrase[(index - phraseStart) % phrase.length] * amplitude;
     return {
       time: pulse.time,
-      y: clamp(centerY + primaryWave + secondaryWave, safeTop, safeBottom),
+      y: clamp(centerY + heightOffset, safeTop, safeBottom),
       beatType: pulse.beatType,
       isDownbeat: pulse.isDownbeat,
       isSubdivision: pulse.isSubdivision,
