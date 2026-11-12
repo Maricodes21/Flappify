@@ -1,44 +1,55 @@
-# Flappyfy Web
+# Flappyfy
 
-This repository is the canonical Flappyfy game source. The Expo/mobile project embeds the production build from this repository; mobile-only authentication, audio, and WebView code belongs in the mobile repository, while gameplay changes belong here.
+Flappyfy is a rhythm-based flight game that turns a local audio file into a playable level. Choose a song, tap in time to collect rhythm targets, and steer through pipes until the track ends. The browser analyzes the file to place targets and obstacles around its beats and changes in energy.
 
-## Current gameplay baseline
+![A Flappyfy run in progress with a live score, rhythm targets, and an approaching pipe](docs/screenshots/gameplay.png)
 
-- Local audio files are the primary path and receive full-file beat and energy analysis.
-- ListenBrainz and Last.fm provide an optional taste layer; their tracks are resolved against the temporary playback provider.
-- Spotify catalog playback is isolated as a private prototype path and is not required for local play.
-- One deterministic transport positions pipes and rhythm dots.
-- Spotify preparation and the three-second countdown run together and wait for confirmed playback.
-- Perfect, Great, and Good rhythm hits earn 3, 2, and 1 point. Each pipe cleared earns 1 point. Rhythm accuracy, flight accuracy, song completion, and XP are tracked separately.
-- Personal bests and Top Tracks use the new points scale. Older scores are labeled Legacy score until a new run sets a points best.
-- Songs can be cleared, replayed, and advanced as playlist journeys.
-- Track mastery, XP, weekly progress, and resumable journeys persist in the browser.
-- The pre-game screen identifies whether a chart is full-track, preview-derived, tempo-guided, or estimated.
+## Play locally
 
-## Run locally
+You’ll need Node.js 22 or newer and npm.
 
-```bash
-npm install
-npm test
+```sh
+npm ci
 npm run dev
 ```
 
-Copy `.env.example` to `.env` to preconfigure a Spotify Client ID and optional Last.fm API key. The Spotify prototype requires Premium. Add the local URL shown by Vite as an allowed redirect URI in the Spotify developer dashboard before signing in. ListenBrainz works from a public username without an API token.
+Open `http://127.0.0.1:5173/`, choose **Drop in your track**, and select an audio file your browser can decode. Choose **Start Run**, then tap the play area or press **Space** to flap. Use the pause button or **Esc** to pause. On a phone, rotate to landscape for the full play area.
 
-Local audio is read through an in-memory browser URL and is not uploaded or written to browser storage. The generated score/chart metadata may persist, but the player asks for the file again after the session ends.
+- Perfect, Great, and Good rhythm hits earn **3, 2, and 1 point** respectively. Each cleared pipe earns **1 point**.
+- The results screen breaks down rhythm accuracy, flight accuracy, song completion, grade, and XP. Personal bests, track mastery, and playlist progress are saved in the browser.
+- Audio playback and analysis stay in the browser session. The app can look up track metadata using information from the file. Re-select a local audio file to replay it in a new session.
 
-## Production build
+| Home | Results |
+| --- | --- |
+| ![Flappyfy home screen with local audio, playlists, and best runs](docs/screenshots/home.png) | ![Completed Flappyfy run with total points, accuracy, and mastery stars](docs/screenshots/results.png) |
 
-```bash
+Screenshots show the running web build playing a generated test track.
+
+## Build and install
+
+```sh
+npm test
 npm run build
+npm run preview
 ```
 
-Vite outputs a standalone page at `dist/index.html`. The mobile wrapper can copy that artifact with its `npm run sync:web` command.
+The production build is in `dist/`. Serve that directory over HTTPS and open it in Android Chrome to install it from the browser menu.
 
-Serve the full `dist` directory over HTTPS to make Flappyfy installable from Chrome on Android. To test the production build with Android Studio's emulator, run `npm run preview`, forward the preview port with `adb reverse tcp:4173 tcp:4173`, and open `http://127.0.0.1:4173/` in Chrome. Use Chrome's **Add to home screen** menu to install the app.
+To test the local preview in an Android Studio emulator, run `adb reverse tcp:4173 tcp:4173` and open `http://127.0.0.1:4173/` inside the emulator.
 
-## Music-platform status
+## Music integrations
 
-Spotify remains suitable only for a small private prototype unless Spotify grants written approval: its current Developer Policy prohibits games and synchronization of Spotify recordings with visual media. Last.fm can provide listening history and taste signals, but not playback, beat analysis, or music rights.
+Local play works without a Spotify or Last.fm account. Last.fm can use a listening profile for recommendations when a `VITE_LASTFM_API_KEY` is configured.
 
-The recommended product architecture separates listening identity, licensed playback, and level analysis. See [MUSIC_PROVIDER_DECISION.md](./MUSIC_PROVIDER_DECISION.md).
+The Spotify catalog integration is experimental. It requires Spotify Premium, an authorized Spotify developer app, and a matching redirect URI. See [`.env.example`](.env.example) for the local configuration and the [Spotify Developer Policy](https://developer.spotify.com/policy) for its restrictions on games and synchronization.
+
+## Project structure
+
+| Path | Purpose |
+| --- | --- |
+| `src/game/` | Audio analysis, rhythm maps, timing, scoring, progression, rendering, and game audio |
+| `src/menu/` and `src/settings/` | Home, library, search, playlists, and customization |
+| `src/services/` | Browser storage and music integrations |
+| `public/` | Web app manifest and install icons |
+| `test/` | Node.js tests |
+| `docs/screenshots/` | Screenshots from the production build |

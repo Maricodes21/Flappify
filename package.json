@@ -14,7 +14,6 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-basic-ssl": "^2.1.4",
     "@vitejs/plugin-react": "^4.5.2",
     "vite": "^6.3.5",
     "vite-plugin-singlefile": "^2.3.3"

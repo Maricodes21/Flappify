@@ -1,8 +1,8 @@
-import { getActiveTheme } from "./game/ThemeEngine";
-import { getSetting } from "./services/storage";
-import { GAME_HEIGHT as H, GAME_WIDTH as W } from "./game/dimensions";
-import { calculateFlightAccuracy, calculateRhythmPoints, calculateSongProgress, calculateTotalScore } from "./game/scoring";
-import { eventXAt, visibleTimeWindow } from "./game/transport";
+import { getActiveTheme } from "./ThemeEngine";
+import { getSetting } from "../services/storage";
+import { GAME_HEIGHT as H, GAME_WIDTH as W } from "./dimensions";
+import { calculateFlightAccuracy, calculateRhythmPoints, calculateSongProgress, calculateTotalScore } from "./scoring";
+import { eventXAt, visibleTimeWindow } from "./transport";
 
 const PIPE_W = 54, BIRD_R = 15;
 

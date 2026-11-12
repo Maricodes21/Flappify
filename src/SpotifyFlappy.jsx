@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { playWhoosh, playDeath, playGrade, playMilestone, playMetronome, playMiss, unlockGameAudio, stopSynthesizedBackingTrack } from "./sounds";
-import { drawGame } from "./renderer";
+import { playWhoosh, playDeath, playGrade, playMilestone, playMetronome, playMiss, unlockGameAudio, stopSynthesizedBackingTrack } from "./game/sounds";
+import { drawGame } from "./game/renderer";
 import { SetupScreen, LoadingScreen, GameScreen, CalibrationScreen, TasteSetupScreen } from "./screens";
 import AppShell from "./menu/AppShell";
 import MainMenu from "./menu/MainMenu";

@@ -1,4 +1,4 @@
-import { getSetting } from "./services/storage.js";
+import { getSetting } from "../services/storage.js";
 
 let audioCtx = null;
 let compressor = null;
