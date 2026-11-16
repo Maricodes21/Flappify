@@ -1,13 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { generateSyntheticAnalysis } from "../src/game/beatMapper.js";
-import { GAME_HEIGHT, GAME_WIDTH } from "../src/game/dimensions.js";
+import { GAME_HEIGHT, GAME_WIDTH, getGameViewport } from "../src/game/dimensions.js";
 import { buildPlayablePulses, buildRhythmSchedule, deriveRhythmPhysics } from "../src/game/rhythmMapper.js";
 
 test("the web game uses a deterministic 16:9 landscape world", () => {
   assert.equal(GAME_WIDTH, 960);
   assert.equal(GAME_HEIGHT, 540);
   assert.equal(GAME_WIDTH / GAME_HEIGHT, 16 / 9);
+});
+
+test("the touch camera fills portrait, tablet, and wide landscape without stretching the world", () => {
+  const portrait = getGameViewport(411, 780, true, 560);
+  const tablet = getGameViewport(800, 1050, true, 560);
+  const landscape = getGameViewport(923, 363, true);
+
+  for (const [view, width, height] of [[portrait, 411, 780], [tablet, 800, 1050], [landscape, 923, 363]]) {
+    assert.ok(Math.abs(width / view.width - height / view.height) < 1e-9);
+    assert.equal(view.top + view.height, GAME_HEIGHT);
+  }
+  assert.equal(portrait.width, 560);
+  assert.ok(tablet.height > GAME_HEIGHT);
+  assert.ok(landscape.width > GAME_WIDTH);
 });
 
 test("playable pulse normalization keeps slow and fast songs readable", () => {

@@ -39,15 +39,33 @@ npm ci
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173/`. Choose **Log in with Spotify** for the configured prototype, or **Drop in your track** for a file your browser can decode. Choose **Start Run**, then tap the play area or press **Space** to flap. Use the pause button or **Esc** to pause. On a phone, rotate to landscape for the full play area.
+Open `http://127.0.0.1:5173/`. Choose **Log in with Spotify** for the configured prototype, or **Drop in your track** for a file your browser can decode. Choose **Start Run**, then tap the play area or press **Space** to flap. Use the pause button or **Esc** to pause.
 
 - Perfect, Great, and Good rhythm hits earn **3, 2, and 1 point** respectively. Each cleared pipe earns **1 point**.
 - The results screen breaks down rhythm accuracy, flight accuracy, song completion, grade, and XP. Personal bests, track mastery, and playlist progress are saved in the browser.
 - Audio playback and analysis stay in the browser session. The app can look up track metadata using information from the file. Re-select a local audio file to replay it in a new session.
 
-| Home | Results |
+## Desktop web
+
+Desktop uses a sidebar and a widescreen stage with keyboard and pointer controls.
+
+| Home dashboard | Widescreen gameplay |
 | --- | --- |
-| ![Flappyfy home screen with local audio, playlists, and best runs](docs/screenshots/home.png) | ![Completed Flappyfy run with total points, accuracy, and mastery stars](docs/screenshots/results.png) |
+| ![Desktop home dashboard with sidebar, playlists, and best runs](docs/screenshots/home.png) | ![Desktop gameplay with a widescreen canvas](docs/screenshots/desktop-gameplay.png) |
+
+## Android phones and tablets
+
+Touch devices use bottom navigation. In portrait, the stage fills the area above a large **Tap to flap** button. In landscape, the stage extends across the display so you can see more of the course. The scene stays in proportion, and you can rotate during a run.
+
+| Phone home | Phone portrait gameplay | Phone results |
+| --- | --- | --- |
+| ![Android PWA home with bottom navigation](docs/screenshots/mobile-home.png) | ![Portrait stage with dedicated flap button](docs/screenshots/mobile-gameplay.png) | ![Portrait run results and replay controls](docs/screenshots/mobile-results.png) |
+
+| Phone landscape | Tablet home | Tablet gameplay |
+| --- | --- | --- |
+| ![Android PWA gameplay in landscape](docs/screenshots/mobile-landscape.png) | ![Android tablet-size home with bottom navigation](docs/screenshots/tablet-home.png) | ![Portrait gameplay on the tablet-sized Android display](docs/screenshots/tablet-gameplay.png) |
+
+The desktop captures are from Chrome. The Android captures are from the installed PWA running in the Android Studio emulator, including a tablet-sized display configuration. [Phone track setup](docs/screenshots/mobile-ready.png)
 
 ## Build and install
 
@@ -57,9 +75,9 @@ npm run build
 npm run preview
 ```
 
-The production build is in `dist/`. Serve that directory over HTTPS and open it in Android Chrome to install it from the browser menu.
+The production build is in `dist/`. Serve the whole directory over HTTPS. In Android Chrome, open the app, choose **Install app** from the browser menu, and launch Flappyfy from the home screen.
 
-To test the local preview in an Android Studio emulator, run `adb reverse tcp:4173 tcp:4173` and open `http://127.0.0.1:4173/` inside the emulator.
+To test the local preview in an Android Studio emulator, run `adb reverse tcp:4173 tcp:4173` and open `http://127.0.0.1:4173/` in emulator Chrome. For Spotify sign-in, register that exact redirect URL for the emulator, or the HTTPS app URL including its path for a hosted build. [Spotify redirect URI requirements](https://developer.spotify.com/documentation/web-api/concepts/redirect_uri)
 
 ## Project structure
 

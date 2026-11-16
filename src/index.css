@@ -712,7 +712,29 @@ html, body, #root {
 .provider-status-card small { color: #737687; font-size: 9px; }
 
 /* ── Widescreen web stage ── */
-.sf-game-shell { isolation: isolate; }
+.sf-game-shell {
+  --stage-width: 960;
+  --stage-height: 540;
+  --game-frame-width: min(calc(100vw - 40px), 1280px, calc((100dvh - 116px) * var(--stage-width) / var(--stage-height)));
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100dvh;
+  overflow: hidden;
+  background: #050508;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.sf-game-shell.is-preparing {
+  justify-content: safe center;
+  overflow: auto;
+  padding: max(10px, env(safe-area-inset-top)) 0 max(10px, env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+.sf-game-shell.is-preparing .sf-game-canvas { display: none; }
 .sf-game-shell::before {
   content: '';
   position: absolute;
@@ -738,78 +760,16 @@ html, body, #root {
   pointer-events: none;
 }
 .sf-game-canvas {
+  display: block;
+  width: var(--game-frame-width);
+  height: calc(var(--game-frame-width) * var(--stage-height) / var(--stage-width));
+  flex: none;
+  touch-action: none;
+  cursor: pointer;
   background: #07070c;
   box-shadow: 0 24px 80px rgba(0,0,0,.58),0 0 0 1px rgba(255,255,255,.025);
 }
-
-/* ── Rotate Banner for Portrait Mobile ── */
-.sf-rotate-banner {
-  position: fixed;
-  top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: min(calc(100vw - 28px), 440px);
-  padding: 10px 14px;
-  background: rgba(13, 13, 20, 0.94);
-  border: 1px solid rgba(29, 185, 84, 0.45);
-  border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(29, 185, 84, 0.25);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  animation: slideUp 0.3s ease-out;
-}
-.sf-rotate-content {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-.sf-rotate-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  background: rgba(29, 185, 84, 0.12);
-  color: #1DB954;
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  animation: breathe 2s ease-in-out infinite;
-}
-.sf-rotate-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.sf-rotate-text strong {
-  font: 800 10px var(--font-display);
-  letter-spacing: 1.2px;
-  color: #4ade80;
-}
-.sf-rotate-text small {
-  color: #a0a0b0;
-  font-size: 10px;
-  line-height: 1.35;
-}
-.sf-rotate-dismiss {
-  background: none;
-  border: none;
-  color: #707080;
-  font-size: 14px;
-  cursor: pointer;
-  padding: 6px;
-  border-radius: 6px;
-  line-height: 1;
-}
-.sf-rotate-dismiss:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.08);
-}
+.sf-touch-flap { display: none; }
 
 /* ── Base Game Stage Elements ── */
 .sf-game-progress {
@@ -985,14 +945,6 @@ html, body, #root {
   .run-list { grid-template-columns: 1fr; }
   .mini-track-grid { grid-template-columns: repeat(3,1fr); }
 }
-@media (max-width: 720px) and (orientation: portrait) {
-  .sf-pregame { width: calc(100vw - 28px); grid-template-columns: 1fr; }
-  .sf-pregame-art-panel { min-height: 230px; gap: 15px; padding: 24px; border-right: 0; border-bottom: 1px solid rgba(255,255,255,.07); }
-  .sf-pregame-artwork { width: 145px; }
-  .sf-pregame-copy { padding: 25px 22px 22px; }
-  .sf-pregame-copy h1 { margin-top: 10px; font-size: 23px; }
-  .sf-pregame-actions { margin-top: 20px; }
-}
 @media (max-width: 520px) {
   .home-screen { padding: 18px 14px; }
   .profile-chip small { display: none; }
@@ -1026,11 +978,6 @@ html, body, #root {
    For mobile devices / webviews rotated horizontally to landscape
    ═══════════════════════════════════════════════════════════ */
 @media (orientation: landscape) and (max-height: 560px), (orientation: landscape) and (max-height: 620px) and (max-width: 960px) {
-  /* Hide the rotate prompt */
-  .sf-rotate-banner {
-    display: none !important;
-  }
-
   /* Full bleed game shell fitting 100dvh without cutoffs */
   .sf-game-shell {
     --game-chrome-h: 0px !important;
@@ -1056,7 +1003,7 @@ html, body, #root {
   /* Thin Progress Bar pinned to the very top edge */
   .sf-game-progress {
     position: absolute !important;
-    top: 0 !important;
+    top: env(safe-area-inset-top) !important;
     left: 50% !important;
     transform: translateX(-50%) !important;
     width: var(--game-frame-width) !important;
@@ -1069,12 +1016,11 @@ html, body, #root {
   /* Sleek Overlaid Top Bar: semi-transparent, compact, thumb-safe */
   .sf-game-topbar {
     position: absolute !important;
-    top: 0 !important;
+    top: env(safe-area-inset-top) !important;
     left: 50% !important;
     transform: translateX(-50%) !important;
     width: var(--game-frame-width) !important;
-    min-height: 38px !important;
-    height: 38px !important;
+    min-height: 50px !important;
     padding: 4px max(14px, env(safe-area-inset-right)) 4px max(14px, env(safe-area-inset-left)) !important;
     background: linear-gradient(180deg, rgba(5,5,8,0.88) 0%, rgba(5,5,8,0.5) 70%, transparent 100%) !important;
     border: none !important;
@@ -1090,14 +1036,15 @@ html, body, #root {
   }
   .sf-game-topbar .music-title {
     font-size: 11px !important;
+    color: #f3f4fb;
   }
   .sf-game-topbar .music-artist {
     font-size: 9px !important;
+    color: #a1a5b6;
   }
   #pause-btn, #home-btn {
-    min-width: 38px !important;
-    min-height: 32px !important;
-    height: 32px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
     padding: 4px 8px !important;
     font-size: 11px !important;
     border-radius: 6px !important;
@@ -1106,7 +1053,7 @@ html, body, #root {
   /* Sleek Overlaid Bottom Bar */
   .sf-game-footer {
     position: absolute !important;
-    bottom: 0 !important;
+    bottom: env(safe-area-inset-bottom) !important;
     left: 50% !important;
     transform: translateX(-50%) !important;
     width: var(--game-frame-width) !important;
@@ -1223,8 +1170,7 @@ html, body, #root {
     padding: 3px 10px !important;
   }
   .sf-game-results-actions button {
-    min-height: 36px !important;
-    height: 36px !important;
+    min-height: 44px !important;
     font-size: 9.5px !important;
     padding: 5px 8px !important;
   }
@@ -2447,4 +2393,165 @@ input[type="range"]::-moz-range-thumb {
 @media (max-width: 767px) {
   .home-container { display: block; }
   .paired-cards-section { margin: 18px 0; }
+}
+
+/* The touch layout uses the whole width and keeps navigation outside the scroll area. */
+@media (max-width: 767px), (pointer: coarse) {
+  .app-shell {
+    flex-direction: column;
+    width: 100%;
+    padding-top: env(safe-area-inset-top);
+    box-sizing: border-box;
+  }
+  .app-shell .desktop-side-nav { display: none !important; }
+  .app-shell .home-header { display: flex !important; }
+  .app-shell-content {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: auto;
+  }
+  .app-shell-content > .screen-scroll { min-height: 0; }
+  .app-shell .bottom-nav {
+    display: flex !important;
+    position: static;
+    gap: 2px;
+    padding: 4px max(6px, env(safe-area-inset-right)) max(7px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
+  }
+  .bottom-nav-btn {
+    flex: 1 1 0;
+    max-width: 132px;
+    min-width: 0;
+    min-height: 48px;
+    justify-content: center;
+    padding: 4px 2px;
+    font-size: clamp(7px, 2vw, 10px);
+    letter-spacing: .35px;
+  }
+  .bottom-nav-btn.active {
+    background: color-mix(in srgb, currentColor 9%, transparent);
+    border-radius: 8px;
+  }
+  .bottom-nav-btn.active::after { bottom: 2px; }
+  .home-container, .library-container, .playlist-track-list-container {
+    padding-bottom: 24px;
+  }
+  .home-header { grid-column: 1 / -1; }
+}
+
+@media (max-width: 767px) {
+  .home-header { margin-bottom: 12px; }
+  .play-paths .play-path-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .play-paths .play-path-grid.is-single { grid-template-columns: minmax(0, 1fr); }
+  .play-paths .play-path-card { min-height: 130px; padding: 12px; }
+  .play-paths .play-path-card::before { inset: -3px -2px -3px -3px; }
+  .play-paths .path-copy strong { font-size: clamp(14px, 4.2vw, 19px); }
+  .play-paths .craft-doodles { display: none; }
+}
+
+@media (max-width: 767px) and (orientation: portrait), (pointer: coarse) and (orientation: portrait) {
+  .sf-game-shell {
+    --stage-width: 560;
+    --game-dock-height: calc(96px + env(safe-area-inset-bottom));
+  }
+  .sf-touch-flap {
+    display: block;
+    position: absolute;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    width: min(calc(100% - 28px), 720px);
+    min-height: 70px;
+    z-index: 14;
+    border: 1px solid color-mix(in srgb, var(--game-accent) 62%, #151923);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--game-accent) 15%, #0c0d16);
+    color: var(--game-accent);
+    font: 800 clamp(15px, 3.5vw, 20px) var(--font-music);
+    letter-spacing: .08em;
+    touch-action: manipulation;
+    cursor: pointer;
+  }
+  .sf-touch-flap:active { background: color-mix(in srgb, var(--game-accent) 26%, #0c0d16); }
+  .sf-touch-flap:disabled { opacity: .5; cursor: default; }
+  .sf-game-shell.is-preparing {
+    justify-content: flex-start;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    background: #fbf6ec;
+  }
+  .sf-game-shell .sf-pregame {
+    width: min(100%, 620px);
+    min-height: 100%;
+    max-height: none;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(225px, 1fr) auto;
+    flex: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .sf-game-shell .sf-pregame-art-panel {
+    min-height: 0;
+    padding: 18px 18px 24px;
+    gap: 12px;
+    border-right: 0;
+    border-bottom: 1.5px solid var(--border-subtle);
+  }
+  .sf-game-shell .sf-pregame-artwork { width: clamp(125px, 28dvh, 230px); }
+  .sf-game-shell .sf-pregame-copy { padding: 24px clamp(20px, 5vw, 44px); }
+  .sf-pregame .sf-chart-source { color: #804514 !important; }
+  .sf-pregame .sf-chart-source[data-track-derived="true"] { color: #255341 !important; }
+  .sf-game-shell .sf-pregame-actions { margin-top: 20px; }
+  .sf-game-shell .sf-pregame-secondary-actions button { min-height: 44px; }
+}
+
+@media (max-width: 767px), (pointer: coarse) {
+  .sf-game-shell:not(.is-preparing) {
+    --stage-fill: 1;
+    --game-frame-width: 100% !important;
+    touch-action: none;
+    background: color-mix(in srgb, var(--game-accent) 8%, #0b0c13);
+  }
+  .sf-game-shell:not(.is-preparing)::after { display: none; }
+  .sf-game-shell:not(.is-preparing) .sf-game-canvas {
+    position: absolute;
+    inset: 0 0 auto;
+    width: 100% !important;
+    height: calc(100% - var(--game-dock-height, 0px)) !important;
+    max-height: none !important;
+    box-shadow: none;
+  }
+  .sf-game-shell .sf-game-progress {
+    position: absolute !important;
+    inset: env(safe-area-inset-top) 0 auto !important;
+    transform: none !important;
+    z-index: 15;
+    border-radius: 0 !important;
+  }
+  .sf-game-shell .sf-game-topbar {
+    position: absolute !important;
+    inset: calc(env(safe-area-inset-top) + 4px) 0 auto !important;
+    transform: none !important;
+    z-index: 12;
+    min-height: 52px !important;
+    padding: 4px max(12px, env(safe-area-inset-right)) 4px max(12px, env(safe-area-inset-left)) !important;
+    border: 0 !important;
+    background: linear-gradient(#0a0a12f0, #0a0a1260) !important;
+  }
+  .sf-game-topbar .music-title { color: #f3f4fb; }
+  .sf-game-topbar .music-artist { color: #a1a5b6; }
+  .sf-game-shell .sf-game-footer {
+    position: absolute !important;
+    inset: auto 0 max(var(--game-dock-height, 0px), env(safe-area-inset-bottom)) !important;
+    transform: none !important;
+    z-index: 12;
+    border: 0 !important;
+    border-radius: 0 !important;
+    padding-inline: max(14px, env(safe-area-inset-left)) max(14px, env(safe-area-inset-right)) !important;
+    background: linear-gradient(transparent, #0a0a12d9) !important;
+    pointer-events: none;
+  }
+  .sf-game-shell .sf-game-results-actions {
+    top: auto !important;
+    bottom: max(10px, env(safe-area-inset-bottom)) !important;
+    text-align: center;
+  }
 }

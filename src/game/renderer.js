@@ -1,12 +1,16 @@
 import { getActiveTheme } from "./ThemeEngine";
 import { getSetting } from "../services/storage";
-import { GAME_HEIGHT as H, GAME_WIDTH as W } from "./dimensions";
+import { GAME_HEIGHT as H, GAME_WIDTH } from "./dimensions";
 import { calculateFlightAccuracy, calculateRhythmPoints, calculateSongProgress, calculateTotalScore } from "./scoring";
 import { eventXAt, visibleTimeWindow } from "./transport";
 
 const PIPE_W = 54, BIRD_R = 15;
 
-export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSprite, albumImg) {
+export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSprite, albumImg, viewport) {
+  const { width: W, height, top, fill } = viewport;
+  const compact = W < GAME_WIDTH;
+  const centerY = top + height / 2;
+  const hudY = top + (fill ? 134 : 56);
   const [pr, pgc, pb] = pal.rgb || [29, 185, 84];
   const theme = getActiveTheme();
 
@@ -15,16 +19,16 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
   ctx.save();
   ctx.translate(shx, shy);
 
-  // ── Kick-Driven Background Scale (disabled — keeping lighting only) ──
-  const kickScale = 1; // no longer scaling canvas on beats
-
   // ── Background (theme-delegated) ──────────────────────────
-  theme.drawBackground(ctx, W, H, g, pal, g.beatFlash);
+  ctx.save();
+  ctx.translate(0, top);
+  theme.drawBackground(ctx, W, height, g, pal, g.beatFlash);
+  ctx.restore();
 
   // Death red flash
   if (g.dFlash > 0.01) {
     ctx.fillStyle = `rgba(255,0,0,${g.dFlash * 0.3})`;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, top, W, height);
   }
 
   // ── Off-Beat Desaturation ─────────────────────────────────
@@ -32,13 +36,13 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
   if ((g.offBeatFlash || 0) > 0.01) {
     ctx.globalAlpha = g.offBeatFlash * 0.45;
     ctx.fillStyle = "#1a1a2e";
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, top, W, height);
     // Vignette effect
-    const vigGrad = ctx.createRadialGradient(W / 2, H / 2, W * 0.3, W / 2, H / 2, W * 0.7);
+    const vigGrad = ctx.createRadialGradient(W / 2, centerY, W * 0.3, W / 2, centerY, W * 0.7);
     vigGrad.addColorStop(0, "transparent");
     vigGrad.addColorStop(1, "rgba(0,0,0,0.6)");
     ctx.fillStyle = vigGrad;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, top, W, height);
     ctx.globalAlpha = 1;
   }
 
@@ -47,34 +51,15 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
     const chromaHue = (performance.now() / 5) % 360;
     ctx.globalAlpha = g.chromaFlash * 0.12;
     ctx.fillStyle = `hsl(${chromaHue}, 100%, 60%)`;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, top, W, height);
     // Edge glow bars
-    const edgeGrad = ctx.createLinearGradient(0, 0, 0, H);
+    const edgeGrad = ctx.createLinearGradient(0, top, 0, H);
     edgeGrad.addColorStop(0, `hsla(${chromaHue}, 100%, 70%, ${g.chromaFlash * 0.3})`);
     edgeGrad.addColorStop(0.5, "transparent");
     edgeGrad.addColorStop(1, `hsla(${(chromaHue + 180) % 360}, 100%, 70%, ${g.chromaFlash * 0.3})`);
     ctx.fillStyle = edgeGrad;
-    ctx.fillRect(0, 0, 4, H);
-    ctx.fillRect(W - 4, 0, 4, H);
-    ctx.globalAlpha = 1;
-  }
-
-  // ── "Drop" GET READY Banner ───────────────────────────────
-  if ((g.dropReadyTimer || 0) > 0) {
-    const readyAlpha = Math.min(1, g.dropReadyTimer * 2);
-    ctx.globalAlpha = readyAlpha * 0.7;
-    ctx.fillStyle = "rgba(0,0,0,0.4)";
-    ctx.fillRect(0, H / 2 - 40, W, 80);
-    ctx.globalAlpha = readyAlpha;
-    ctx.font = "bold 28px Orbitron, monospace";
-    ctx.textAlign = "center";
-    ctx.fillStyle = "#FFD700";
-    ctx.shadowColor = "#FFD700"; ctx.shadowBlur = 20;
-    ctx.fillText("GET READY!", W / 2, H / 2 + 10);
-    ctx.shadowBlur = 0;
-    ctx.font = "10px Space Mono, monospace";
-    ctx.fillStyle = "rgba(255,215,0,0.6)";
-    ctx.fillText("DROP INCOMING", W / 2, H / 2 + 30);
+    ctx.fillRect(0, top, 4, height);
+    ctx.fillRect(W - 4, top, 4, height);
     ctx.globalAlpha = 1;
   }
 
@@ -95,18 +80,18 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
     ctx.globalAlpha = Math.min(1, a);
     ctx.fillStyle = pal.bright;
     ctx.beginPath();
-    ctx.arc(s.x, s.y, s.r * (1 + g.beatFlash * 0.6), 0, Math.PI * 2);
+    ctx.arc(s.x * W / GAME_WIDTH, top + s.y * height / H, s.r * (1 + g.beatFlash * 0.6), 0, Math.PI * 2);
     ctx.fill();
   });
   ctx.globalAlpha = 1;
 
   // Beat pulse
   if (g.beatFlash > 0.05) {
-    const rg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W * 0.8);
+    const rg = ctx.createRadialGradient(W / 2, centerY, 0, W / 2, centerY, W * 0.8);
     rg.addColorStop(0, `rgba(${pr},${pgc},${pb},${g.beatFlash * 0.08})`);
     rg.addColorStop(1, "transparent");
     ctx.fillStyle = rg;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, top, W, height);
   }
 
   // Shockwaves
@@ -150,7 +135,10 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
     // Combine beatGlow with anticipation
     const combinedGlow = Math.max(p.beatGlow || 0, anticipation * 0.7);
 
-    theme.drawPipe(ctx, p.x, p.gy, p.gap, PIPE_W, combinedGlow, pal, { H });
+    ctx.save();
+    ctx.translate(0, top);
+    theme.drawPipe(ctx, p.x, p.gy - top, p.gap, PIPE_W, combinedGlow, pal, { H: height });
+    ctx.restore();
 
     // A two-tone gap edge remains readable even when album colors are close
     // to the active theme background.
@@ -649,6 +637,25 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
     ctx.fillRect(i * vw + 1, H - 68 - h, vw - 2, h);
   });
 
+  // ── "Drop" GET READY Banner ───────────────────────────────
+  if ((g.dropReadyTimer || 0) > 0) {
+    const readyAlpha = Math.min(1, g.dropReadyTimer * 2);
+    ctx.globalAlpha = readyAlpha * 0.7;
+    ctx.fillStyle = "rgba(0,0,0,0.4)";
+    ctx.fillRect(0, centerY - 40, W, 80);
+    ctx.globalAlpha = readyAlpha;
+    ctx.font = "bold 28px Orbitron, monospace";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#FFD700";
+    ctx.shadowColor = "#FFD700"; ctx.shadowBlur = 20;
+    ctx.fillText("GET READY!", W / 2, centerY + 10);
+    ctx.shadowBlur = 0;
+    ctx.font = "10px Space Mono, monospace";
+    ctx.fillStyle = "rgba(255,215,0,0.6)";
+    ctx.fillText("DROP INCOMING", W / 2, centerY + 30);
+    ctx.globalAlpha = 1;
+  }
+
   // ── Overdrive Mode indicator ──────────────────────────────
   if (inOverdrive && curPhase === "playing") {
     const overHue = (performance.now() / 12) % 360;
@@ -657,7 +664,7 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
     ctx.textAlign = "center";
     ctx.fillStyle = `hsl(${overHue}, 100%, 70%)`;
     ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 12;
-    ctx.fillText("★ OVERDRIVE ★", W / 2, 108);
+    ctx.fillText("★ OVERDRIVE ★", W / 2, hudY + 52);
     ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
   }
@@ -665,7 +672,7 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
   // ── Combo Meter Bar ───────────────────────────────────────
   if (curPhase === "playing" && (g.perfectStreak || 0) > 0) {
     const meterW = 80, meterH = 3;
-    const meterX = W / 2 - meterW / 2, meterY = 115;
+    const meterX = W / 2 - meterW / 2, meterY = hudY + 59;
     const fill = Math.min(1, (g.perfectStreak || 0) / 5);
     ctx.globalAlpha = 0.5;
     ctx.fillStyle = "#1a1a28";
@@ -689,7 +696,7 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
   ctx.font = "bold 44px Orbitron, monospace";
   ctx.textAlign = "center";
   const liveTotal = calculateTotalScore(g);
-  ctx.fillText(liveTotal.toLocaleString(), W / 2, 56);
+  ctx.fillText(liveTotal.toLocaleString(), W / 2, hudY);
   ctx.shadowBlur = 0;
 
   // Combo counter
@@ -699,7 +706,7 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
     ctx.fillStyle = g.combo >= 10 ? "#FFD700" : pal.bright;
     ctx.shadowColor = g.combo >= 10 ? "#FFD700" : pal.glow;
     ctx.shadowBlur = 10;
-    ctx.fillText(`${g.combo} COMBO`, W / 2, 78);
+    ctx.fillText(`${g.combo} COMBO`, W / 2, hudY + 22);
     ctx.shadowBlur = 0;
   }
 
@@ -733,16 +740,16 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
   // Idle overlay
   if (curPhase === "idle") {
     ctx.fillStyle = "rgba(0,0,0,0.5)";
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, top, W, height);
     ctx.textAlign = "center";
     ctx.font = "bold 24px Orbitron, monospace";
     ctx.shadowColor = pal.glow; ctx.shadowBlur = 24;
     ctx.fillStyle = "#fff";
-    ctx.fillText("TAP TO FLY", W / 2, H / 2 - 10);
+    ctx.fillText("TAP TO FLY", W / 2, centerY - 10);
     ctx.shadowBlur = 0;
     ctx.font = "12px Space Mono, monospace";
     ctx.fillStyle = pal.base;
-    ctx.fillText("RIDE THE BEAT", W / 2, H / 2 + 28);
+    ctx.fillText("RIDE THE BEAT", W / 2, centerY + 28);
   }
 
   // Keep the countdown on screen through audio startup, then fade it into play.
@@ -753,7 +760,7 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
     const opacity = goFade > 0 ? goFade : 1;
     ctx.save();
     ctx.fillStyle = `rgba(0,0,0,${0.45 * opacity})`;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, top, W, height);
     ctx.textAlign = "center";
 
     const countdownDuration = g.countdownDurationMs || 3000;
@@ -769,12 +776,12 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
     ctx.strokeStyle = pal.bright;
     ctx.lineWidth = 3;
     ctx.shadowColor = pal.glow; ctx.shadowBlur = 20;
-    ctx.beginPath(); ctx.arc(W / 2, H / 2, ringRadius, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(W / 2, centerY, ringRadius, 0, Math.PI * 2); ctx.stroke();
     ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
 
     ctx.save();
-    ctx.translate(W / 2, H / 2);
+    ctx.translate(W / 2, centerY);
     ctx.scale(scale, scale);
 
     ctx.font = "bold 72px Orbitron, monospace";
@@ -790,7 +797,7 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
       ctx.font = "12px Space Mono, monospace";
       ctx.fillStyle = `rgba(${pr},${pgc},${pb},0.78)`;
       const waitingMs = g.lastT - g.countdownStartedAt - countdownDuration;
-      ctx.fillText(g.countdownHolding && waitingMs > 250 ? "SYNCING MUSIC…" : "MUSIC READY", W / 2, H / 2 + 68);
+      ctx.fillText(g.countdownHolding && waitingMs > 250 ? "SYNCING MUSIC…" : "MUSIC READY", W / 2, centerY + 68);
     }
     ctx.restore();
   }
@@ -799,13 +806,13 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
   // confirms that the requested track is actively playing.
   if (curPhase === "syncing" || curPhase === "sync-error") {
     ctx.fillStyle = "rgba(0,0,0,0.68)";
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, top, W, height);
     ctx.textAlign = "center";
 
     if (curPhase === "syncing") {
       const angle = (performance.now() / 650) % (Math.PI * 2);
       ctx.save();
-      ctx.translate(W / 2, H / 2 - 52);
+      ctx.translate(W / 2, centerY - 52);
       ctx.rotate(angle);
       ctx.strokeStyle = pal.bright;
       ctx.lineWidth = 5;
@@ -822,11 +829,11 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
     ctx.fillStyle = curPhase === "sync-error" ? "#ff6680" : "#fff";
     ctx.shadowColor = curPhase === "sync-error" ? "#ff2244" : pal.glow;
     ctx.shadowBlur = 20;
-    ctx.fillText(g.syncMessage || (curPhase === "syncing" ? "LOADING SPOTIFY" : "MUSIC DIDN'T START"), W / 2, H / 2 + 12);
+    ctx.fillText(g.syncMessage || (curPhase === "syncing" ? "LOADING SPOTIFY" : "MUSIC DIDN'T START"), W / 2, centerY + 12);
     ctx.shadowBlur = 0;
     ctx.font = "12px Space Mono, monospace";
     ctx.fillStyle = curPhase === "sync-error" ? "#fff" : pal.base;
-    ctx.fillText(g.syncDetail || (curPhase === "syncing" ? "WAITING FOR THE TRACK TO START…" : "TAP TO RETRY"), W / 2, H / 2 + 48);
+    ctx.fillText(g.syncDetail || (curPhase === "syncing" ? "WAITING FOR THE TRACK TO START…" : "TAP TO RETRY"), W / 2, centerY + 48);
   }
 
   // Results overlay
@@ -835,41 +842,41 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
     const resultColor = completed ? pal.bright : "#ff4466";
     const resultGlow = completed ? pal.glow : "#ff2244";
     ctx.fillStyle = "rgba(0,0,0,0.75)";
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, top, W, height);
     ctx.textAlign = "center";
 
     ctx.font = "900 36px Orbitron, monospace";
     ctx.shadowColor = resultGlow; ctx.shadowBlur = 28;
     ctx.fillStyle = resultColor;
-    ctx.fillText(completed ? "LEVEL CLEARED" : "GAME OVER", W / 2, H / 2 - 140);
+    ctx.fillText(completed ? "LEVEL CLEARED" : "GAME OVER", W / 2, centerY - 140);
     ctx.shadowBlur = 0;
 
     const totalScore = g.totalScore || 0;
     ctx.font = "bold 42px Orbitron, monospace";
     ctx.fillStyle = "#fff";
     ctx.shadowColor = "rgba(245,166,35,0.6)"; ctx.shadowBlur = 16;
-    ctx.fillText(totalScore.toLocaleString(), W / 2, H / 2 - 90);
+    ctx.fillText(totalScore.toLocaleString(), W / 2, centerY - 90);
     ctx.shadowBlur = 0;
 
     ctx.font = "11px Space Mono, monospace";
     ctx.fillStyle = "#f5a623";
-    ctx.fillText("TOTAL POINTS", W / 2, H / 2 - 72);
+    ctx.fillText("TOTAL POINTS", W / 2, centerY - 72);
 
     const bestScore = bestRef.current;
     if (g.isNewBest) {
       ctx.font = "bold 13px Orbitron, monospace";
       ctx.fillStyle = "#FFD700";
       ctx.shadowColor = "#FFD700"; ctx.shadowBlur = 12;
-      ctx.fillText("★ NEW BEST! ★", W / 2, H / 2 - 54);
+      ctx.fillText("★ NEW BEST! ★", W / 2, centerY - 54);
       ctx.shadowBlur = 0;
     } else if (bestScore > 0) {
       ctx.font = "12px Space Mono, monospace";
       ctx.fillStyle = "#9090a0";
-      ctx.fillText(`BEST ${bestScore.toLocaleString()}`, W / 2, H / 2 - 54);
+      ctx.fillText(`BEST ${bestScore.toLocaleString()}`, W / 2, centerY - 54);
     }
 
     const pct = calculateSongProgress(g);
-    const barW = 180, barH = 5, barX = (W - barW) / 2, barY = H / 2 - 36;
+    const barW = 180, barH = 5, barX = (W - barW) / 2, barY = centerY - 36;
     ctx.fillStyle = "#1a1a28";
     ctx.beginPath(); ctx.roundRect(barX, barY, barW, barH, 3); ctx.fill();
     const progGrad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
@@ -880,30 +887,31 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
     ctx.fillStyle = pal.bright;
     ctx.fillText(`${pct}% of song`, W / 2, barY + 16);
 
-    ctx.font = "12px Space Mono, monospace";
+    ctx.font = `${compact ? 17 : 12}px Space Mono, monospace`;
     ctx.fillStyle = "#9090a0";
     const rhythmAccuracy = g.rhythmAccuracy || 0;
 
-    const breakdownY = H / 2 + 4;
+    const breakdownY = centerY + 4;
+    const breakdownInset = compact ? 116 : 85;
 
     // Rhythm accuracy
     ctx.textAlign = "left";
     ctx.fillStyle = "#9090a0";
-    ctx.fillText("Rhythm:", W / 2 - 85, breakdownY);
+    ctx.fillText("Rhythm:", W / 2 - breakdownInset, breakdownY);
     ctx.textAlign = "right";
     ctx.fillStyle = rhythmAccuracy >= 55 ? "#FFD700" : "#c0c0cc";
-    ctx.fillText(`${rhythmAccuracy}%  ·  ${calculateRhythmPoints(g)} pts`, W / 2 + 85, breakdownY);
+    ctx.fillText(`${rhythmAccuracy}%  ·  ${calculateRhythmPoints(g)} pts`, W / 2 + breakdownInset, breakdownY);
 
     ctx.textAlign = "left";
     ctx.fillStyle = "#9090a0";
-    ctx.fillText("Flight:", W / 2 - 85, breakdownY + 22);
+    ctx.fillText("Flight:", W / 2 - breakdownInset, breakdownY + 22);
     ctx.textAlign = "right";
     ctx.fillStyle = "#aaa";
-    ctx.fillText(`${g.flightAccuracy || 0}%  ·  ${g.totalPipes || 0} pts`, W / 2 + 85, breakdownY + 22);
+    ctx.fillText(`${g.flightAccuracy || 0}%  ·  ${g.totalPipes || 0} pts`, W / 2 + breakdownInset, breakdownY + 22);
 
     // Perfects and Misses
     ctx.textAlign = "center";
-    ctx.font = "11px Space Mono, monospace";
+    ctx.font = `${compact ? 15 : 11}px Space Mono, monospace`;
     ctx.fillStyle = "#a0a0b0";
     ctx.fillText(`${g.rhythmPerfects || 0} PERFECT  ·  ${g.rhythmMisses || 0} MISS  ·  ${g.maxRhythmStreak || 0} STREAK`, W / 2, breakdownY + 50);
 
@@ -926,7 +934,7 @@ export function drawGame(ctx, g, pal, f, curPhase, bestRef, isPaused, activeSpri
   // Canvas just dims slightly so the HTML overlay is readable
   if (isPaused && curPhase === "playing") {
     ctx.fillStyle = "rgba(0,0,0,0.45)";
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, top, W, height);
   }
 
   ctx.restore();

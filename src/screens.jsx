@@ -26,7 +26,7 @@ export function SetupScreen({
     setIsLoggingIn(true);
     try {
       await login();
-    } catch (e) {
+    } finally {
       setIsLoggingIn(false);
     }
   };
@@ -434,102 +434,34 @@ export function CalibrationScreen({ features, palette, onComplete, onSkip }) {
 export function GameScreen({ W, H, canvasRef, track, features, chartAnalysis, palette, score, best, combo, difficulty, setDifficulty, flap, setScreen, togglePause, paused, phase, resumePending, pauseFeedback, onCalibrate, calibrationOffset, onBackToMenu, onRetry, onNextTrack, nextJourneyTrack, runReward, trackKey, isAudioReady = true, audioPrepMessage = "" }) {
   const [showPreGame, setShowPreGame] = useState(true);
   const [songProgress, setSongProgress] = useState(0);
-  const [isPortraitMobile, setIsPortraitMobile] = useState(false);
-  const [dismissRotateHint, setDismissRotateHint] = useState(false);
-
-  // Reset pre-game interstitial whenever a new track is picked
   useEffect(() => {
     setShowPreGame(true);
-    setDismissRotateHint(false);
+    setSongProgress(0);
   }, [trackKey]);
-
-  // Monitor device orientation on mobile
-  useEffect(() => {
-    const checkOrientation = () => {
-      const isPortrait = window.matchMedia("(orientation: portrait)").matches || (window.innerHeight > window.innerWidth);
-      const isMobileSize = Math.min(window.innerWidth, window.innerHeight) <= 768;
-      setIsPortraitMobile(isPortrait && isMobileSize);
-    };
-    checkOrientation();
-    window.addEventListener("resize", checkOrientation);
-    window.addEventListener("orientationchange", checkOrientation);
-    return () => {
-      window.removeEventListener("resize", checkOrientation);
-      window.removeEventListener("orientationchange", checkOrientation);
-    };
-  }, []);
 
   const handleStartRun = useCallback(() => {
     setShowPreGame(false);
     flap();
-    try {
-      if (screen.orientation && screen.orientation.lock) {
-        screen.orientation.lock("landscape").catch(() => {});
-      }
-    } catch {}
   }, [flap]);
 
   // Update song progress from game state
   useEffect(() => {
     if (showPreGame) return;
     const interval = setInterval(() => {
-      const el = document.querySelector("canvas");
-      if (el && el.__gameState) {
-        const g = el.__gameState;
-        if (g.songDur > 0 && g.gt > 0) {
-          setSongProgress(Math.min(100, (g.gt / g.songDur) * 100));
-        }
-      }
+      const g = canvasRef.current?.__gameState;
+      if (g?.songDur > 0) setSongProgress(Math.min(100, (g.gt / g.songDur) * 100));
     }, 250);
     return () => clearInterval(interval);
-  }, [showPreGame]);
-
-  /* ── Always render both the canvas (hidden) and whichever UI is active ──
-     The canvas MUST be in the DOM at all times so the game loop in
-     SpotifyFlappy.jsx can grab canvasRef.current and call initGame().
-     During the pre-game interstitial the canvas sits offscreen (0×0),
-     then expands once the user taps GO. */
+  }, [canvasRef, showPreGame]);
 
   return (
     <div
-      className="sf-game-shell"
+      className={showPreGame ? "sf-game-shell is-preparing" : "sf-game-shell"}
       onPointerDown={event => {
         if (showPreGame || event.target === canvasRef.current || event.target.closest?.("button")) return;
         flap();
       }}
-      style={{ "--game-frame-width": `min(calc(100vw - 40px), 1280px, calc(${((100 * W) / H).toFixed(3)}dvh - ${((116 * W) / H).toFixed(1)}px))`, height: "100dvh", minHeight: "100dvh", overflow: "hidden", touchAction: "none", background: "#050508", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: FM, userSelect: "none", WebkitTapHighlightColor: "transparent", position: "relative" }}>
-
-      {/* ── Orientation hint banner for mobile users entering in portrait ── */}
-      {isPortraitMobile && !dismissRotateHint && (
-        <aside className="sf-rotate-banner" role="status" aria-label="Rotate device recommendation">
-          <div className="sf-rotate-content">
-            <div className="sf-rotate-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="4" y="2" width="16" height="20" rx="3" />
-                <path d="M12 18h.01" strokeWidth="3" />
-                <path d="M19 12a7 7 0 0 1-7 7" stroke="#1DB954" strokeWidth="2.5" strokeDasharray="3 3" />
-                <path d="M22 12l-3-3-3 3" stroke="#1DB954" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <div className="sf-rotate-text">
-              <strong>ROTATE FOR WIDESCREEN</strong>
-              <small>Turn sideways for the full landscape rhythm stage</small>
-            </div>
-          </div>
-          <button
-            type="button"
-            className="sf-rotate-dismiss"
-            onClick={e => { e.stopPropagation(); setDismissRotateHint(true); }}
-            aria-label="Dismiss rotation prompt"
-          >
-            ✕
-          </button>
-        </aside>
-      )}
-
-      {/* ── Canvas (always mounted so game loop can init) ── */}
-      {/* When pre-game is showing, canvas is 1x1 offscreen so it exists in DOM
-          but doesn't interfere with layout. When gameplay starts, it renders normally. */}
+      style={{ "--game-accent": palette?.bright || "#4ade80", fontFamily: FM }}>
       <canvas ref={canvasRef} width={W} height={H} className="sf-game-canvas"
         role="button"
         aria-label="Tap to flap"
@@ -538,25 +470,13 @@ export function GameScreen({ W, H, canvasRef, track, features, chartAnalysis, pa
           event.preventDefault();
           flap();
         }}
-        style={{
-          position: showPreGame ? "fixed" : "static",
-          left: showPreGame ? -9999 : undefined,
-          top: showPreGame ? -9999 : undefined,
-          width: showPreGame ? 1 : "var(--game-frame-width)",
-          height: showPreGame ? 1 : "auto",
-          opacity: showPreGame ? 0 : 1,
-          pointerEvents: showPreGame ? "none" : "auto",
-          display: "block", boxSizing: "border-box", flexShrink: 0, touchAction: "none", cursor: showPreGame ? "default" : "pointer",
-          borderLeft: showPreGame ? "none" : `1px solid ${palette?.base || "#1DB954"}22`,
-          borderRight: showPreGame ? "none" : `1px solid ${palette?.base || "#1DB954"}22`,
-          order: 0,
-        }} />
+      />
 
       {/* ═══ Pre-game interstitial overlay ═══ */}
       {showPreGame && (
         <section className="sf-pregame" aria-label="Track ready">
           <div className="sf-pregame-art-panel">
-            <span className="sf-pregame-kicker">WIDESCREEN RHYTHM STAGE</span>
+            <span className="sf-pregame-kicker">RHYTHM STAGE</span>
             {track?.album?.images?.[0] ? (
               <div className="sf-pregame-artwork">
                 <img src={track.album.images[0].url} alt=""
@@ -581,7 +501,7 @@ export function GameScreen({ W, H, canvasRef, track, features, chartAnalysis, pa
             <h1 className="music-title">{track?.name}</h1>
             <div className="music-artist">{track?.artists?.map(a => a.name).join(", ")}</div>
             {chartAnalysis && (
-              <div title={chartAnalysis.detail} style={{
+              <div className="sf-chart-source" data-track-derived={chartAnalysis.trackDerived} title={chartAnalysis.detail} style={{
                 display: "inline-flex", alignItems: "center", gap: 6, marginTop: 10,
                 padding: "5px 9px", borderRadius: 999,
                 border: `1px solid ${chartAnalysis.trackDerived ? "rgba(0,240,255,0.35)" : "rgba(245,166,35,0.4)"}`,
@@ -719,6 +639,15 @@ export function GameScreen({ W, H, canvasRef, track, features, chartAnalysis, pa
               {combo > 1 && <span style={{ fontSize: 10, color: "#4ade80", marginLeft: 8 }}>{combo} COMBO</span>}
             </div>
           </footer>
+
+          {phase !== "dead" && phase !== "completed" && (
+            <button type="button" className="sf-touch-flap"
+              disabled={paused || (phase !== "playing" && phase !== "sync-error")}
+              onPointerDown={event => { if (event.isPrimary && event.button === 0) flap(); }}
+              onClick={event => { if (event.detail === 0) flap(); }}>
+              {phase === "sync-error" ? "Retry audio" : "Tap to flap"}
+            </button>
+          )}
 
           {/* ── Pause overlay: Menu + Resume buttons ── */}
           {paused && (

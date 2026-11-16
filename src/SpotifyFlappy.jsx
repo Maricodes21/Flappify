@@ -19,7 +19,7 @@ import { buildPipeSchedule, computeDifficultyRating, distanceToNearestDownbeat, 
 import { analyzeLocalAudio, analyzePreview } from "./game/audioAnalyzer";
 import { getThemeById, THEMES, applyThemeCSS } from "./game/ThemeEngine";
 import { saveSetting, getHomeThemeChoice } from "./services/storage";
-import { GAME_HEIGHT as H, GAME_WIDTH as W, PLAYER_X } from "./game/dimensions";
+import { GAME_HEIGHT as H, GAME_WIDTH as W, PLAYER_X, getGameViewport } from "./game/dimensions";
 import { calculateFlightAccuracy, calculateRating, calculateRhythmAccuracy, calculateRhythmPoints, calculateSongProgress, calculateTotalScore, getScorePoints, RHYTHM_POINTS } from "./game/scoring";
 import { advanceTransportPosition, eventXAt, projectTransportPosition, reconcileTransportAnchor } from "./game/transport";
 import { getCountdownState, shouldCompleteRun } from "./game/runState";
@@ -94,6 +94,8 @@ function getPlaybackTrackUri(state) {
 }
 
 const SPOTIFY_SESSION_KEY = "sf_spotify_auth";
+const SPOTIFY_LOGIN_KEY = "sf_spotify_login";
+const SPOTIFY_LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
 
 function getBootAuth() {
   try {
@@ -122,7 +124,13 @@ function reportSpotifyPlayback(status, details = {}) {
 const DEFAULT_SPOTIFY_CLIENT_ID = "9866081b7994432ca3ff709f75e26173";
 
 function getRedirectUri() {
-  return window.__spotifyRedirectUri || import.meta.env.VITE_SPOTIFY_REDIRECT_URI?.trim() || `${location.origin}/`;
+  if (window.__spotifyRedirectUri) return window.__spotifyRedirectUri;
+  const current = new URL("./", location.href);
+  const configured = import.meta.env.VITE_SPOTIFY_REDIRECT_URI?.trim();
+  if (!configured) return current.href;
+  const redirect = new URL(configured);
+  const isLoopback = host => host === "127.0.0.1" || host === "[::1]";
+  return isLoopback(redirect.hostname) && redirect.origin !== current.origin ? current.href : redirect.href;
 }
 
 export default function SpotifyFlappy() {
@@ -425,27 +433,25 @@ export default function SpotifyFlappy() {
     const params = new URLSearchParams(location.search);
     const code = params.get("code");
     const providerError = params.get("error");
+    if (!code && !providerError) return;
+    if (code && spotifyCodeExchangeRef.current === code) return;
+    spotifyCodeExchangeRef.current = code;
+    // The redirect can return in a different Android Chrome window.
+    let pendingLogin;
+    try { pendingLogin = JSON.parse(localStorage.getItem(SPOTIFY_LOGIN_KEY) || "null"); } catch {}
+    history.replaceState({}, "", location.pathname);
+    if (!pendingLogin || pendingLogin.state !== params.get("state") || pendingLogin.expiresAt <= Date.now()) {
+      setSpotifyAuthError("This Spotify login session expired. Start the connection again.");
+      setScreen("setup");
+      return;
+    }
+    localStorage.removeItem(SPOTIFY_LOGIN_KEY);
     if (providerError) {
       setSpotifyAuthError(params.get("error_description") || `Spotify sign-in was not completed (${providerError}).`);
       setScreen("setup");
-      history.replaceState({}, "", location.pathname);
       return;
     }
-    if (!code) return;
-    if (spotifyCodeExchangeRef.current === code) return;
-    spotifyCodeExchangeRef.current = code;
-    const verifier = sessionStorage.getItem("sf_v");
-    const callbackClientId = sessionStorage.getItem("sf_cid");
-    const redirectUri = sessionStorage.getItem("sf_redirect_uri") || getRedirectUri();
-    if (!verifier || !callbackClientId) {
-      setSpotifyAuthError("This Spotify login session expired. Start the connection again.");
-      setScreen("setup");
-      history.replaceState({}, "", location.pathname);
-      return;
-    }
-    // Spotify authorization codes are single-use. Remove it from the address
-    // before the request so React Strict Mode cannot redeem it a second time.
-    history.replaceState({}, "", location.pathname);
+    const { verifier, clientId: callbackClientId, redirectUri } = pendingLogin;
     fetch("https://accounts.spotify.com/api/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -468,9 +474,6 @@ export default function SpotifyFlappy() {
         });
         setSpotifyAuthError("");
         setScreen("menu");
-        sessionStorage.removeItem("sf_v");
-        sessionStorage.removeItem("sf_cid");
-        sessionStorage.removeItem("sf_redirect_uri");
       })
       .catch(error => {
         const message = error?.message || "Spotify could not finish connecting.";
@@ -487,18 +490,28 @@ export default function SpotifyFlappy() {
       setSpotifyAuthError("No Spotify Client ID configured.");
       return;
     }
+    if (!window.isSecureContext) {
+      setSpotifyAuthError("Open Flappyfy over HTTPS to connect Spotify.");
+      return;
+    }
     setSpotifyAuthError("");
-    setClientId(activeClientId);
-    localStorage.setItem("sf_client_id", activeClientId);
-    const redirectUri = getRedirectUri();
-    const { v, c } = await genPKCE();
-    sessionStorage.setItem("sf_v", v);
-    sessionStorage.setItem("sf_cid", activeClientId);
-    sessionStorage.setItem("sf_redirect_uri", redirectUri);
-    const p = new URLSearchParams({ client_id: activeClientId, response_type: "code", redirect_uri: redirectUri,
-      scope: "playlist-read-private user-library-read streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state user-top-read user-read-currently-playing user-read-recently-played",
-      code_challenge_method: "S256", code_challenge: c });
-    location.href = `https://accounts.spotify.com/authorize?${p}`;
+    try {
+      const redirectUri = getRedirectUri();
+      const { v, c } = await genPKCE();
+      const state = crypto.randomUUID();
+      setClientId(activeClientId);
+      localStorage.setItem("sf_client_id", activeClientId);
+      localStorage.setItem(SPOTIFY_LOGIN_KEY, JSON.stringify({
+        state, verifier: v, clientId: activeClientId, redirectUri,
+        expiresAt: Date.now() + SPOTIFY_LOGIN_TIMEOUT_MS,
+      }));
+      const p = new URLSearchParams({ client_id: activeClientId, response_type: "code", redirect_uri: redirectUri,
+        scope: "playlist-read-private user-library-read streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state user-top-read user-read-currently-playing user-read-recently-played",
+        code_challenge_method: "S256", code_challenge: c, state });
+      location.href = `https://accounts.spotify.com/authorize?${p}`;
+    } catch {
+      setSpotifyAuthError("Spotify sign-in could not start. Check the redirect URI and allow site storage, then try again.");
+    }
   };
 
   // Playback SDK
@@ -1291,8 +1304,7 @@ export default function SpotifyFlappy() {
     setTokenExpiresAt(0);
     setUserProfile(null);
     setScreen("menu");
-    sessionStorage.removeItem("sf_v");
-    sessionStorage.removeItem("sf_cid");
+    localStorage.removeItem(SPOTIFY_LOGIN_KEY);
     sessionStorage.removeItem(SPOTIFY_SESSION_KEY);
     postNativeMessage({ type: "spotify-logout" });
   }, []);
@@ -1583,6 +1595,22 @@ export default function SpotifyFlappy() {
     if (screen !== "game") return;
     const canvas = canvasRef.current; if (!canvas) return;
     const ctx = canvas.getContext("2d"); aliveRef.current = true; initGame();
+    let viewport = getGameViewport(W, H, false);
+    const resizeCanvas = () => {
+      const { width, height } = canvas.getBoundingClientRect();
+      if (!width || !height) return;
+      const style = getComputedStyle(canvas);
+      viewport = getGameViewport(width, height, style.getPropertyValue("--stage-fill").trim() === "1",
+        Number(style.getPropertyValue("--stage-width")) || W);
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+      const pixelWidth = Math.round(width * pixelRatio);
+      const pixelHeight = Math.round(height * pixelRatio);
+      if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+      if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+    };
+    const canvasObserver = new ResizeObserver(resizeCanvas);
+    canvasObserver.observe(canvas);
+    window.addEventListener("resize", resizeCanvas);
     // Expose game state on canvas element for progress bar reading
     Object.defineProperty(canvas, '__gameState', { get: () => gsRef.current, configurable: true });
     const TDT = 1000 / 60;
@@ -1590,6 +1618,11 @@ export default function SpotifyFlappy() {
     let frameId = 0;
     let cancelled = false;
     const activeSprite = getActiveSprite();
+    const renderFrame = (g, pal, features, phase, paused = false) => {
+      const yScale = canvas.height / viewport.height;
+      ctx.setTransform(canvas.width / viewport.width, 0, 0, yScale, 0, -viewport.top * yScale);
+      drawGame(ctx, g, pal, features, phase, bestRef, paused, activeSprite, albumImgRef.current, viewport);
+    };
 
     const finalizeRun = (g, outcome) => {
       if (g.runFinalized) return;
@@ -1712,7 +1745,7 @@ export default function SpotifyFlappy() {
       const g = gsRef.current; if (!g) { frameId = requestAnimationFrame(tick); return; }
 
       if (pausedRef.current) {
-        drawGame(ctx, g, palRef.current, featRef.current || { tempo: 120, energy: 0.7, key: 7 }, phaseRef.current, bestRef, true, activeSprite, albumImgRef.current);
+        renderFrame(g, palRef.current, featRef.current || { tempo: 120, energy: 0.7, key: 7 }, phaseRef.current, true);
         frameId = requestAnimationFrame(tick);
         return;
       }
@@ -1722,7 +1755,7 @@ export default function SpotifyFlappy() {
         // Keep the scene still until playback is confirmed; otherwise the bird
         // and obstacles advance while the audio clock is waiting to start.
         g.lastT = now;
-        drawGame(ctx, g, palRef.current, featRef.current || { tempo: 120, energy: 0.7, key: 7 }, cp, bestRef, false, activeSprite, albumImgRef.current);
+        renderFrame(g, palRef.current, featRef.current || { tempo: 120, energy: 0.7, key: 7 }, cp);
         frameId = requestAnimationFrame(tick);
         return;
       }
@@ -1750,7 +1783,7 @@ export default function SpotifyFlappy() {
 
       if (shouldCompleteRun(cp, g.gt, g.songDur, g.runFinalized)) {
         finalizeRun(g, "completed");
-        drawGame(ctx, g, pal, f, "completed", bestRef, false, activeSprite, albumImgRef.current);
+        renderFrame(g, pal, f, "completed");
         frameId = requestAnimationFrame(tick);
         return;
       }
@@ -1779,7 +1812,7 @@ export default function SpotifyFlappy() {
           playMetronome();
         }
         g.countdownHolding = countdown.holding;
-        drawGame(ctx, g, pal, f, cp, bestRef, false, activeSprite, albumImgRef.current);
+        renderFrame(g, pal, f, cp);
         frameId = requestAnimationFrame(tick);
         return;
       }
@@ -1862,7 +1895,8 @@ export default function SpotifyFlappy() {
 
         // Pipe spawning — schedule-based (rhythm-driven, beat-optimal path)
         if (g.pipeSchedule && g.pipeSchedule.length > 0) {
-          while (g.scheduleIdx < g.pipeSchedule.length && g.gt >= g.pipeSchedule[g.scheduleIdx].time) {
+          const cameraLead = Math.max(0, viewport.width - W) / (g.speed * 60);
+          while (g.scheduleIdx < g.pipeSchedule.length && g.gt + cameraLead >= g.pipeSchedule[g.scheduleIdx].time) {
             const entry = g.pipeSchedule[g.scheduleIdx];
             const pipeGap = entry.gapSize;
             // Use beat-predicted gapY if available, otherwise fall back to random
@@ -2062,7 +2096,7 @@ export default function SpotifyFlappy() {
         }
       }
 
-      drawGame(ctx, g, pal, f, cp, bestRef, false, activeSprite, albumImgRef.current);
+      renderFrame(g, pal, f, cp);
       frameId = requestAnimationFrame(tick);
     };
     frameId = requestAnimationFrame(tick);
@@ -2070,6 +2104,8 @@ export default function SpotifyFlappy() {
       cancelled = true;
       aliveRef.current = false;
       cancelAnimationFrame(frameId);
+      canvasObserver.disconnect();
+      window.removeEventListener("resize", resizeCanvas);
       pausePlay();
     };
   }, [screen, initGame, setPhase, pausePlay, pollAudioPosition, getActiveSprite]);
