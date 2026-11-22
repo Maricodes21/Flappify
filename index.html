@@ -16,6 +16,13 @@
   <body>
     <div id="root"></div>
     <script>
+      // Keep the Spotify callback stable across both GitHub Pages entry URLs.
+      if (location.origin === 'https://maricodes21.github.io' && /^\/Flappify(?:\/|$)/.test(location.pathname)) {
+        window.__SF_CONFIG__ = {
+          ...window.__SF_CONFIG__,
+          spotifyRedirectUri: 'https://maricodes21.github.io/Flappify/',
+        };
+      }
       window.onSpotifyWebPlaybackSDKReady = window.onSpotifyWebPlaybackSDKReady || function () {};
     </script>
     <script async src="https://sdk.scdn.co/spotify-player.js"></script>
@@ -23,7 +30,7 @@
       <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', function () {
-          navigator.serviceWorker.register('./sw.js?v=1b57b65ff60b68b1').catch(function (error) {
+          navigator.serviceWorker.register('./sw.js?v=2026112200010001').catch(function (error) {
             console.warn('Flappyfy offline setup failed:', error);
           });
         });
